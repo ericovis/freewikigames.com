@@ -57,6 +57,10 @@ internal/
 
 **Database**: PostgreSQL is the single store for raw HTML, structured game data, embeddings (pgvector), and user/session state.
 
+## Scraper Package
+
+The `internal/scraper` package implements all Wikipedia fetch logic. See [`internal/scraper/SCRAPER.md`](internal/scraper/SCRAPER.md) for the full developer guide, including how to add new crawler modes, the worker pool and rate-limiter design, and testing conventions.
+
 ## Local Development
 
 Infrastructure runs via Docker Compose; the Go API is run directly on the host.

@@ -1,0 +1,169 @@
+package scraper
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+)
+
+// testConfig returns a Config pointed at baseURL with settings suitable for
+// fast local tests: high RPS, short timeout, limited concurrency.
+func testConfig(baseURL string) Config {
+	return Config{
+		MaxWorkers: 2,
+		RPS:        50,
+		MaxDepth:   1,
+		MaxPages:   10,
+		Timeout:    5 * time.Second,
+		BaseURL:    baseURL,
+	}
+}
+
+func TestScrapeURL_ReturnsHTMLAndTimestamp(t *testing.T) {
+	const body = "<html><body>hello world</body></html>"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	s := New(testConfig(srv.URL))
+	ctx := context.Background()
+
+	var results []ScrapeResult
+	for r := range s.ScrapeURL(ctx, srv.URL+"/wiki/Test") {
+		results = append(results, r)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+	if r.Err != nil {
+		t.Fatalf("unexpected error: %v", r.Err)
+	}
+	if r.HTML != body {
+		t.Errorf("HTML mismatch: got %q, want %q", r.HTML, body)
+	}
+	if r.Timestamp.IsZero() {
+		t.Error("expected non-zero timestamp")
+	}
+	if r.URL != srv.URL+"/wiki/Test" {
+		t.Errorf("URL mismatch: got %q, want %q", r.URL, srv.URL+"/wiki/Test")
+	}
+}
+
+func TestScrapeURLs_ReturnsOneResultPerURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "<html><body>%s</body></html>", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	paths := []string{"/wiki/A", "/wiki/B", "/wiki/C"}
+	urls := make([]string, len(paths))
+	for i, p := range paths {
+		urls[i] = srv.URL + p
+	}
+
+	s := New(testConfig(srv.URL))
+	ctx := context.Background()
+
+	results := make(map[string]ScrapeResult)
+	for r := range s.ScrapeURLs(ctx, urls) {
+		results[r.URL] = r
+	}
+
+	if len(results) != len(urls) {
+		t.Fatalf("expected %d results, got %d", len(urls), len(results))
+	}
+	for _, u := range urls {
+		r, ok := results[u]
+		if !ok {
+			t.Errorf("missing result for %s", u)
+			continue
+		}
+		if r.Err != nil {
+			t.Errorf("unexpected error for %s: %v", u, r.Err)
+		}
+	}
+}
+
+func TestScrapeURL_ContextCancellation_ChannelAlwaysClosed(t *testing.T) {
+	var once sync.Once
+	ready := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(ready) })
+		// Block until the request context is cancelled (client disconnects)
+		// so the test server doesn't linger after srv.Close().
+		select {
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	defer srv.Close()
+
+	s := New(testConfig(srv.URL))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch := s.ScrapeURL(ctx, srv.URL+"/wiki/Slow")
+
+	// Wait for the request to actually reach the server, then cancel.
+	<-ready
+	cancel()
+
+	// Range must complete (channel must be closed).
+	var results []ScrapeResult
+	for r := range ch {
+		results = append(results, r)
+	}
+
+	for _, r := range results {
+		if r.Err == nil {
+			t.Error("expected error due to context cancellation, got nil")
+		}
+	}
+}
+
+func TestScrapeURL_HTTPError_SurfacedAsErr(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	s := New(testConfig(srv.URL))
+	ctx := context.Background()
+
+	var results []ScrapeResult
+	for r := range s.ScrapeURL(ctx, srv.URL+"/wiki/Broken") {
+		results = append(results, r)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Err == nil {
+		t.Error("expected non-nil Err for HTTP 500, got nil")
+	}
+}
+
+func TestScrapeURLs_EmptyList_ChannelClosedImmediately(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "should not be called")
+	}))
+	defer srv.Close()
+
+	s := New(testConfig(srv.URL))
+	ctx := context.Background()
+
+	var count int
+	for range s.ScrapeURLs(ctx, nil) {
+		count++
+	}
+	if count != 0 {
+		t.Errorf("expected 0 results for empty URL list, got %d", count)
+	}
+}

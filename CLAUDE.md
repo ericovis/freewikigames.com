@@ -37,10 +37,12 @@ The project follows a monorepo layout with distinct binaries and internal shared
 ```
 cmd/
   api/        — HTTP API server (game sessions, user-facing endpoints)
+  migrate/    — Migration CLI (up, status)
   scraper/    — Wikipedia scraping worker
   worker/     — Background jobs (AI question generation, dedup analysis)
 internal/
   db/         — Database access layer (PostgreSQL via pgx)
+    migrations/ — Embedded SQL migration files
   scraper/    — Wikipedia fetch + HTML storage logic
   questions/  — AI-driven question generation and similarity/dedup logic
   game/       — Game session, lobby, and multiplayer state management
@@ -56,6 +58,18 @@ internal/
 **Multiplayer**: Real-time game sessions are managed server-side; the API binary handles both REST endpoints and WebSocket connections for live gameplay.
 
 **Database**: PostgreSQL is the single store for raw HTML, structured game data, embeddings (pgvector), and user/session state.
+
+## Database Package
+
+The `internal/db` package implements connection management, DAO-style data access, and migration execution. See [`internal/db/DB.md`](internal/db/DB.md) for the full developer guide, including how to add DAOs, write migrations, and create cross-table services.
+
+```bash
+# Apply pending migrations
+go run ./cmd/migrate up
+
+# Check migration status
+go run ./cmd/migrate status
+```
 
 ## Scraper Package
 

@@ -42,3 +42,8 @@ func (d *DB) Close() {
 func (d *DB) Pages() *PageDAO {
 	return &PageDAO{pool: d.pool}
 }
+
+// Questions returns a QuestionDAO bound to this DB's connection pool.
+func (d *DB) Questions() *QuestionDAO {
+	return &QuestionDAO{pool: d.pool}
+}

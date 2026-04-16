@@ -75,6 +75,25 @@ go run ./cmd/migrate status
 
 The `internal/scraper` package implements all Wikipedia fetch logic. See [`internal/scraper/SCRAPER.md`](internal/scraper/SCRAPER.md) for the full developer guide, including how to add new crawler modes, the worker pool and rate-limiter design, and testing conventions.
 
+## AI Package
+
+The `internal/ai` package is a thin HTTP client for the local Ollama instance. See [`internal/ai/AI.md`](internal/ai/AI.md) for the developer guide, including the request/response shape, environment variable conventions, and testing patterns.
+
+## Questions Package
+
+The `internal/questions` package generates trivia questions from raw Wikipedia HTML using the local Ollama instance. See [`internal/questions/QUESTIONS.md`](internal/questions/QUESTIONS.md) for the developer guide, including the LLM prompt strategy, response validation rules, and testing conventions.
+
+## Package Conventions
+
+Every `internal/` package must include an architecture reference file (e.g. `PACKAGE.md`) that documents its purpose, key types, design decisions, and testing conventions. Existing examples:
+
+- [`internal/db/DB.md`](internal/db/DB.md)
+- [`internal/scraper/SCRAPER.md`](internal/scraper/SCRAPER.md)
+- [`internal/ai/AI.md`](internal/ai/AI.md)
+- [`internal/questions/QUESTIONS.md`](internal/questions/QUESTIONS.md)
+
+When adding a new `internal/` package, create the architecture file alongside the first `.go` file.
+
 ## Testing
 
 **Every change must have tests and must pass `./cmd/test` before it is considered done.**

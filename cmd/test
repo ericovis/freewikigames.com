@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Always run from the repo root (directory containing go.mod), regardless of
+# where the script is invoked from.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+# Load .env if present (never committed; overrides defaults below)
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source .env
+  set +a
+fi
+
+# Defaults — match docker-compose.yml credentials
+: "${DATABASE_URL:=postgres://freewiki:freewiki@localhost:5432/freewiki?sslmode=disable}"
+: "${OLLAMA_HOST:=http://localhost:11434}"
+: "${OLLAMA_MODEL:=gemma4:e2b}"
+
+export DATABASE_URL OLLAMA_HOST OLLAMA_MODEL
+
+echo "DATABASE_URL=${DATABASE_URL}"
+echo "OLLAMA_HOST=${OLLAMA_HOST}"
+echo "OLLAMA_MODEL=${OLLAMA_MODEL}"
+echo ""
+
+if [[ $# -eq 0 ]]; then
+  exec go test -v ./...
+else
+  exec go test "$@"
+fi

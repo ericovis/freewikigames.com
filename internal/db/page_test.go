@@ -113,9 +113,9 @@ func TestPageDAO_FindOldestScraped(t *testing.T) {
 
 	base := time.Now().UTC().Truncate(time.Millisecond)
 	urls := []string{
-		"https://en.wikipedia.org/wiki/C",
-		"https://en.wikipedia.org/wiki/B",
 		"https://en.wikipedia.org/wiki/A",
+		"https://en.wikipedia.org/wiki/B",
+		"https://en.wikipedia.org/wiki/C",
 	}
 	for i, u := range urls {
 		// Insert with descending scraped times so A is newest, C is oldest.

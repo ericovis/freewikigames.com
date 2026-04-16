@@ -14,14 +14,14 @@ Go module: `github.com/ericovis/freewikigames.com`
 # Build all binaries
 go build ./...
 
-# Run all tests
-go test ./...
+# Run all tests (verbose)
+./cmd/test
+
+# Run a specific package
+./cmd/test ./internal/db/...
 
 # Run a single test
-go test ./path/to/package -run TestName
-
-# Run tests with verbose output
-go test -v ./...
+./cmd/test -run TestMigrate ./internal/db/...
 
 # Run linter (golangci-lint expected)
 golangci-lint run ./...
@@ -74,6 +74,34 @@ go run ./cmd/migrate status
 ## Scraper Package
 
 The `internal/scraper` package implements all Wikipedia fetch logic. See [`internal/scraper/SCRAPER.md`](internal/scraper/SCRAPER.md) for the full developer guide, including how to add new crawler modes, the worker pool and rate-limiter design, and testing conventions.
+
+## Testing
+
+**Every change must have tests and must pass `./cmd/test` before it is considered done.**
+
+### Running tests
+
+Use `./cmd/test` rather than `go test ./...` directly. The script sources `.env` (if present) and exports the required env vars with safe defaults so database-backed tests connect correctly.
+
+```bash
+# Run all tests (verbose)
+./cmd/test
+
+# Run a specific package
+./cmd/test ./internal/db/...
+
+# Run a single test
+./cmd/test -run TestMigrate ./internal/db/...
+```
+
+### Writing tests
+
+- **Package**: place test files in the same package as the code under test (`package foo`, not `package foo_test`) so unexported internals are accessible.
+- **Database tests**: use `TestMain` + `truncateTables` + `runMigrations` (see `internal/db/testhelper_test.go`) to share one real connection pool per package. Never mock the database — integration tests must hit a real Postgres instance.
+- **HTTP/network tests**: use `net/http/httptest` servers instead of real external endpoints.
+- **Test names**: `Test<Type>_<Method>_<Scenario>` (e.g. `TestPageDAO_Upsert_Insert`).
+- **No test helpers in non-test files**: helper functions used only in tests go in `*_test.go` files.
+- **Env vars in tests**: rely on the defaults already set by `./cmd/test`; never hard-code credentials.
 
 ## Local Development
 

@@ -152,9 +152,14 @@ func (g *Generator) generateForSection(ctx context.Context, title, language, sum
 // boilerplateSections is a set of lowercased section titles that never contain
 // trivia-worthy facts and should be skipped during question generation.
 var boilerplateSections = map[string]bool{
+	// English
 	"see also": true, "references": true, "external links": true,
 	"notes": true, "bibliography": true, "further reading": true,
 	"footnotes": true, "sources": true, "citations": true,
+	// Portuguese
+	"ver também": true, "referências": true, "ligações externas": true,
+	"notas": true, "bibliografia": true, "leitura adicional": true,
+	"leitura complementar": true, "notas de rodapé": true, "fontes": true,
 }
 
 // splitSections splits markdown content into chunks on ## and ### headings.

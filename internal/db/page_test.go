@@ -206,6 +206,93 @@ func TestPageDAO_Delete(t *testing.T) {
 	}
 }
 
+func TestPageDAO_FindWithoutQuestions_ReturnsUnprocessedPages(t *testing.T) {
+	truncateTables(t)
+	runMigrations(t)
+
+	ctx := context.Background()
+	dao := &PageDAO{pool: testPool}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/A", "<html/>", now); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/B", "<html/>", now); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	pages, err := dao.FindWithoutQuestions(ctx, 10)
+	if err != nil {
+		t.Fatalf("FindWithoutQuestions: %v", err)
+	}
+	if len(pages) != 2 {
+		t.Errorf("expected 2 pages, got %d", len(pages))
+	}
+}
+
+func TestPageDAO_FindWithoutQuestions_ExcludesPagesWithQuestions(t *testing.T) {
+	truncateTables(t)
+	runMigrations(t)
+
+	ctx := context.Background()
+	dao := &PageDAO{pool: testPool}
+	qDAO := &QuestionDAO{pool: testPool}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	pageA, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/A", "<html/>", now)
+	if err != nil {
+		t.Fatalf("Upsert A: %v", err)
+	}
+	if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/B", "<html/>", now); err != nil {
+		t.Fatalf("Upsert B: %v", err)
+	}
+
+	choices := []Choice{
+		{Text: "A", Correct: true},
+		{Text: "B", Correct: false},
+		{Text: "C", Correct: false},
+		{Text: "D", Correct: false},
+		{Text: "E", Correct: false},
+	}
+	if _, err := qDAO.Insert(ctx, pageA.ID, "Q?", "en", choices); err != nil {
+		t.Fatalf("Insert question: %v", err)
+	}
+
+	pages, err := dao.FindWithoutQuestions(ctx, 10)
+	if err != nil {
+		t.Fatalf("FindWithoutQuestions: %v", err)
+	}
+	if len(pages) != 1 {
+		t.Fatalf("expected 1 page without questions, got %d", len(pages))
+	}
+	if pages[0].URL != "https://en.wikipedia.org/wiki/B" {
+		t.Errorf("expected page B, got %q", pages[0].URL)
+	}
+}
+
+func TestPageDAO_FindWithoutQuestions_RespectsLimit(t *testing.T) {
+	truncateTables(t)
+	runMigrations(t)
+
+	ctx := context.Background()
+	dao := &PageDAO{pool: testPool}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	for _, u := range []string{"A", "B", "C", "D", "E"} {
+		if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/"+u, "<html/>", now); err != nil {
+			t.Fatalf("Upsert %s: %v", u, err)
+		}
+	}
+
+	pages, err := dao.FindWithoutQuestions(ctx, 3)
+	if err != nil {
+		t.Fatalf("FindWithoutQuestions: %v", err)
+	}
+	if len(pages) != 3 {
+		t.Errorf("expected 3 pages (limit), got %d", len(pages))
+	}
+}
+
 // runMigrations applies all pending migrations within a test. It is called after
 // truncateTables so the schema_migrations table is also empty and migrations re-run.
 func runMigrations(t *testing.T) {

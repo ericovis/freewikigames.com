@@ -3,6 +3,7 @@ package questions
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,30 @@ func TestGenerator_Generate_PropagatesAIError(t *testing.T) {
 	_, err := g.Generate(context.Background(), "<p>text</p>")
 	if err == nil {
 		t.Fatal("expected error from AI client, got nil")
+	}
+}
+
+func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
+	var capturedPrompt string
+	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
+		capturedPrompt = prompt
+		resp := dst.(*llmResponse)
+		resp.Questions = []Question{
+			{Text: "Q1", Choices: fiveChoices(0)},
+		}
+		return nil
+	}}
+
+	g := New(ai)
+	questions, err := g.GenerateWithLanguage(context.Background(), "<html><p>some article</p></html>", "pt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(questions) != 1 {
+		t.Errorf("expected 1 question, got %d", len(questions))
+	}
+	if !strings.Contains(capturedPrompt, `"pt"`) {
+		t.Errorf("expected prompt to contain language code \"pt\", got: %s", capturedPrompt)
 	}
 }
 

@@ -21,6 +21,7 @@ type Question struct {
 	ID        int64
 	PageID    int64
 	Text      string
+	Language  string
 	Choices   []Choice
 	CreatedAt time.Time
 }
@@ -33,17 +34,17 @@ type QuestionDAO struct {
 
 // Insert inserts a new question linked to the given page and returns the full
 // persisted row.
-func (d *QuestionDAO) Insert(ctx context.Context, pageID int64, text string, choices []Choice) (*Question, error) {
+func (d *QuestionDAO) Insert(ctx context.Context, pageID int64, text, language string, choices []Choice) (*Question, error) {
 	choicesJSON, err := json.Marshal(choices)
 	if err != nil {
 		return nil, err
 	}
 
 	row := d.pool.QueryRow(ctx, `
-		INSERT INTO questions (page_id, text, choices)
-		VALUES ($1, $2, $3)
-		RETURNING id, page_id, text, choices, created_at
-	`, pageID, text, choicesJSON)
+		INSERT INTO questions (page_id, text, language, choices)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, page_id, text, language, choices, created_at
+	`, pageID, text, language, choicesJSON)
 
 	return scanQuestion(row)
 }
@@ -51,7 +52,7 @@ func (d *QuestionDAO) Insert(ctx context.Context, pageID int64, text string, cho
 // FindByID returns the question with the given id, or (nil, nil) if not found.
 func (d *QuestionDAO) FindByID(ctx context.Context, id int64) (*Question, error) {
 	row := d.pool.QueryRow(ctx, `
-		SELECT id, page_id, text, choices, created_at
+		SELECT id, page_id, text, language, choices, created_at
 		FROM questions
 		WHERE id = $1
 	`, id)
@@ -66,7 +67,7 @@ func (d *QuestionDAO) FindByID(ctx context.Context, id int64) (*Question, error)
 // FindByPage returns all questions for the given page ordered by id ascending.
 func (d *QuestionDAO) FindByPage(ctx context.Context, pageID int64) ([]Question, error) {
 	rows, err := d.pool.Query(ctx, `
-		SELECT id, page_id, text, choices, created_at
+		SELECT id, page_id, text, language, choices, created_at
 		FROM questions
 		WHERE page_id = $1
 		ORDER BY id ASC
@@ -91,7 +92,7 @@ func (d *QuestionDAO) Delete(ctx context.Context, id int64) error {
 func scanQuestion(row pgx.Row) (*Question, error) {
 	var q Question
 	var choicesJSON []byte
-	if err := row.Scan(&q.ID, &q.PageID, &q.Text, &choicesJSON, &q.CreatedAt); err != nil {
+	if err := row.Scan(&q.ID, &q.PageID, &q.Text, &q.Language, &choicesJSON, &q.CreatedAt); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(choicesJSON, &q.Choices); err != nil {
@@ -106,7 +107,7 @@ func collectQuestions(rows pgx.Rows) ([]Question, error) {
 	for rows.Next() {
 		var q Question
 		var choicesJSON []byte
-		if err := rows.Scan(&q.ID, &q.PageID, &q.Text, &choicesJSON, &q.CreatedAt); err != nil {
+		if err := rows.Scan(&q.ID, &q.PageID, &q.Text, &q.Language, &choicesJSON, &q.CreatedAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(choicesJSON, &q.Choices); err != nil {

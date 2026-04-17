@@ -87,6 +87,26 @@ func (d *PageDAO) List(ctx context.Context, limit, offset int) ([]Page, error) {
 	return collectPages(rows)
 }
 
+// FindWithoutQuestions returns up to limit pages that have no rows in the
+// questions table, ordered by id ascending (oldest first).
+func (d *PageDAO) FindWithoutQuestions(ctx context.Context, limit int) ([]Page, error) {
+	rows, err := d.pool.Query(ctx, `
+		SELECT p.id, p.url, p.raw_html, p.last_scraped_at, p.created_at
+		FROM raw_pages p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM questions q WHERE q.page_id = p.id
+		)
+		ORDER BY p.id ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return collectPages(rows)
+}
+
 // Delete removes the page with the given URL. It is a no-op if the URL does not exist.
 func (d *PageDAO) Delete(ctx context.Context, url string) error {
 	_, err := d.pool.Exec(ctx, `DELETE FROM raw_pages WHERE url = $1`, url)

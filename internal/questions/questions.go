@@ -87,6 +87,39 @@ func (g *Generator) Generate(ctx context.Context, rawHTML string) ([]Question, e
 	return valid, nil
 }
 
+const promptTemplateWithLanguage = `You are a trivia question generator. Given the following Wikipedia article text, generate as many multiple-choice trivia questions as you can.
+
+Rules:
+- Each question must have exactly 5 answer choices.
+- Exactly 1 choice must be correct (set "correct": true); the other 4 must be incorrect (set "correct": false).
+- Generate all questions in the "%s" language (ISO 639-1 code).
+- Return ONLY a JSON object with this exact structure, no other text:
+{"questions": [{"text": "<question text>", "choices": [{"text": "<answer>", "correct": <true|false>}, ...]}, ...]}
+
+Article text:
+%s`
+
+// GenerateWithLanguage is like Generate but instructs the LLM to produce
+// questions in the specified language (ISO 639-1 code, e.g. "en", "pt", "de").
+func (g *Generator) GenerateWithLanguage(ctx context.Context, rawHTML, language string) ([]Question, error) {
+	text := stripHTML(rawHTML)
+	prompt := fmt.Sprintf(promptTemplateWithLanguage, language, text)
+
+	var resp llmResponse
+	if err := g.ai.GenerateJSON(ctx, prompt, &resp); err != nil {
+		return nil, fmt.Errorf("generate questions: %w", err)
+	}
+
+	var valid []Question
+	for _, q := range resp.Questions {
+		if err := validate(q); err != nil {
+			continue
+		}
+		valid = append(valid, q)
+	}
+	return valid, nil
+}
+
 // validate checks that q has exactly 5 choices with exactly 1 marked correct.
 func validate(q Question) error {
 	if len(q.Choices) != 5 {

@@ -15,9 +15,9 @@ import (
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	terms := os.Args[1:]
-	if len(terms) == 0 {
-		logger.Error("usage: scraper <term> [term ...]")
+	urls := os.Args[1:]
+	if len(urls) == 0 {
+		logger.Error("usage: scraper <url> [url ...]")
 		os.Exit(1)
 	}
 
@@ -42,7 +42,7 @@ func main() {
 	cfg.MaxDepth = 0
 	sc := scraper.New(cfg)
 
-	w := worker.NewScrapeWorker(terms, sc, database.Pages(), logger)
+	w := worker.NewScrapeWorker(urls, sc, database.Pages(), logger)
 	if err := w.Run(ctx); err != nil {
 		logger.Error("scrape worker", "err", err)
 		os.Exit(1)

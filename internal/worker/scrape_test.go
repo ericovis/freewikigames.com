@@ -31,9 +31,9 @@ type mockPageDAO struct {
 	findWithoutQuestionsFn func(ctx context.Context, limit int) ([]db.Page, error)
 }
 
-func (m *mockPageDAO) Upsert(ctx context.Context, url, rawHTML string, scrapedAt time.Time) (*db.Page, error) {
+func (m *mockPageDAO) Upsert(ctx context.Context, url, language, title, summary, content string, datePublished, dateModified *time.Time) (*db.Page, error) {
 	m.upserted = append(m.upserted, url)
-	return &db.Page{ID: 1, URL: url}, nil
+	return &db.Page{ID: 1, URL: url, Language: language}, nil
 }
 
 func (m *mockPageDAO) FindWithoutQuestions(ctx context.Context, limit int) ([]db.Page, error) {
@@ -45,8 +45,8 @@ func (m *mockPageDAO) FindWithoutQuestions(ctx context.Context, limit int) ([]db
 
 func TestScrapeWorker_Run_StoresResults(t *testing.T) {
 	sc := &mockScraper{results: []scraper.ScrapeResult{
-		{URL: "https://en.wikipedia.org/wiki/A", HTML: "<html/>", Timestamp: time.Now()},
-		{URL: "https://en.wikipedia.org/wiki/B", HTML: "<html/>", Timestamp: time.Now()},
+		{URL: "https://en.wikipedia.org/wiki/A", Language: "en", Title: "A", Summary: "A summary.", Content: "## A"},
+		{URL: "https://en.wikipedia.org/wiki/B", Language: "en", Title: "B", Summary: "B summary.", Content: "## B"},
 	}}
 	pages := &mockPageDAO{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -64,7 +64,7 @@ func TestScrapeWorker_Run_StoresResults(t *testing.T) {
 func TestScrapeWorker_Run_SkipsErrors(t *testing.T) {
 	sc := &mockScraper{results: []scraper.ScrapeResult{
 		{URL: "https://en.wikipedia.org/wiki/A", Err: context.DeadlineExceeded},
-		{URL: "https://en.wikipedia.org/wiki/B", HTML: "<html/>", Timestamp: time.Now()},
+		{URL: "https://en.wikipedia.org/wiki/B", Language: "en", Title: "B", Summary: "B summary.", Content: "## B"},
 	}}
 	pages := &mockPageDAO{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -83,7 +83,6 @@ func TestScrapeWorker_Run_SkipsErrors(t *testing.T) {
 }
 
 func TestScrapeWorker_Run_ExitsOnContextCancel(t *testing.T) {
-	// Channel that never sends — worker should exit when ctx is cancelled.
 	blocked := make(chan scraper.ScrapeResult)
 	sc := &blockingScraper{ch: blocked}
 	pages := &mockPageDAO{}

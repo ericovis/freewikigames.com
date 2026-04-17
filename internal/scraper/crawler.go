@@ -97,7 +97,7 @@ func (s *WikipediaScraper) CrawlFromURL(ctx context.Context, startURL string) <-
 				total++
 
 				if result.Err == nil {
-					for _, path := range discoverLinks(result.HTML) {
+					for _, path := range discoverLinks(result.rawHTML) {
 						link := s.baseURL() + path
 						if _, seen := visited.LoadOrStore(link, true); !seen {
 							frontier = append(frontier, link)

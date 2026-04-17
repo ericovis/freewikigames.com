@@ -3,8 +3,6 @@ package questions
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strings"
 )
 
 // Choice is a single answer option for a question.
@@ -31,7 +29,7 @@ type aiClient interface {
 	GenerateJSON(ctx context.Context, prompt string, dst any) error
 }
 
-// Generator generates trivia questions from raw Wikipedia HTML.
+// Generator generates trivia questions from structured Wikipedia article data.
 type Generator struct {
 	ai aiClient
 }
@@ -41,53 +39,7 @@ func New(ai aiClient) *Generator {
 	return &Generator{ai: ai}
 }
 
-var tagRegexp = regexp.MustCompile(`<[^>]+>`)
-
-// stripHTML removes HTML tags and collapses whitespace so the prompt sent to
-// the LLM is compact plain text.
-func stripHTML(html string) string {
-	plain := tagRegexp.ReplaceAllString(html, " ")
-	// Collapse runs of whitespace into a single space and trim.
-	fields := strings.Fields(plain)
-	return strings.Join(fields, " ")
-}
-
-const promptTemplate = `You are a trivia question generator. Given the following Wikipedia article text, generate as many multiple-choice trivia questions as you can.
-
-Rules:
-- Each question must have exactly 5 answer choices.
-- Exactly 1 choice must be correct (set "correct": true); the other 4 must be incorrect (set "correct": false).
-- Return ONLY a JSON object with this exact structure, no other text:
-{"questions": [{"text": "<question text>", "choices": [{"text": "<answer>", "correct": <true|false>}, ...]}, ...]}
-
-Article text:
-%s`
-
-// Generate sends the stripped article HTML to the AI and returns all questions
-// that pass structural validation. Questions with the wrong number of choices
-// or an invalid number of correct answers are silently skipped.
-// Returns an error only if the AI call itself fails or the response cannot be
-// parsed at all.
-func (g *Generator) Generate(ctx context.Context, rawHTML string) ([]Question, error) {
-	text := stripHTML(rawHTML)
-	prompt := fmt.Sprintf(promptTemplate, text)
-
-	var resp llmResponse
-	if err := g.ai.GenerateJSON(ctx, prompt, &resp); err != nil {
-		return nil, fmt.Errorf("generate questions: %w", err)
-	}
-
-	var valid []Question
-	for _, q := range resp.Questions {
-		if err := validate(q); err != nil {
-			continue
-		}
-		valid = append(valid, q)
-	}
-	return valid, nil
-}
-
-const promptTemplateWithLanguage = `You are a trivia question generator. Given the following Wikipedia article text, generate as many multiple-choice trivia questions as you can.
+const promptTemplate = `You are a trivia question generator. Given the following Wikipedia article, generate as many multiple-choice trivia questions as you can.
 
 Rules:
 - Each question must have exactly 5 answer choices.
@@ -96,14 +48,18 @@ Rules:
 - Return ONLY a JSON object with this exact structure, no other text:
 {"questions": [{"text": "<question text>", "choices": [{"text": "<answer>", "correct": <true|false>}, ...]}, ...]}
 
-Article text:
+Title: %s
+
+Summary:
+%s
+
+Article:
 %s`
 
-// GenerateWithLanguage is like Generate but instructs the LLM to produce
-// questions in the specified language (ISO 639-1 code, e.g. "en", "pt", "de").
-func (g *Generator) GenerateWithLanguage(ctx context.Context, rawHTML, language string) ([]Question, error) {
-	text := stripHTML(rawHTML)
-	prompt := fmt.Sprintf(promptTemplateWithLanguage, language, text)
+// GenerateWithLanguage generates trivia questions from structured article data.
+// language is an ISO 639-1 code (e.g. "en", "pt", "de").
+func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, summary, content string) ([]Question, error) {
+	prompt := fmt.Sprintf(promptTemplate, language, title, summary, content)
 
 	var resp llmResponse
 	if err := g.ai.GenerateJSON(ctx, prompt, &resp); err != nil {

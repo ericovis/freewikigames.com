@@ -3,8 +3,17 @@ package db
 import (
 	"context"
 	"testing"
-	"time"
 )
+
+// upsertTestPage is a helper that inserts a page with sensible defaults.
+func upsertTestPage(t *testing.T, ctx context.Context, dao *PageDAO, url string) *Page {
+	t.Helper()
+	p, err := dao.Upsert(ctx, url, "en", "Test Title", "Test summary.", "## Content\nBody text.", nil, nil)
+	if err != nil {
+		t.Fatalf("upsert page %s: %v", url, err)
+	}
+	return p
+}
 
 func TestPageDAO_Upsert_Insert(t *testing.T) {
 	truncateTables(t)
@@ -12,9 +21,12 @@ func TestPageDAO_Upsert_Insert(t *testing.T) {
 
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
-	now := time.Now().UTC().Truncate(time.Millisecond)
 
-	page, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/Go", "<html>Go</html>", now)
+	page, err := dao.Upsert(ctx,
+		"https://en.wikipedia.org/wiki/Go",
+		"en", "Go (programming language)", "Go is a language.", "## Overview\nGo is open source.",
+		nil, nil,
+	)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -25,14 +37,20 @@ func TestPageDAO_Upsert_Insert(t *testing.T) {
 	if page.URL != "https://en.wikipedia.org/wiki/Go" {
 		t.Errorf("URL = %q, want %q", page.URL, "https://en.wikipedia.org/wiki/Go")
 	}
-	if page.RawHTML != "<html>Go</html>" {
-		t.Errorf("RawHTML = %q, want %q", page.RawHTML, "<html>Go</html>")
+	if page.Language != "en" {
+		t.Errorf("Language = %q, want %q", page.Language, "en")
 	}
-	if !page.LastScrapedAt.Equal(now) {
-		t.Errorf("LastScrapedAt = %v, want %v", page.LastScrapedAt, now)
+	if page.Title != "Go (programming language)" {
+		t.Errorf("Title = %q, want %q", page.Title, "Go (programming language)")
 	}
-	if page.CreatedAt.IsZero() {
-		t.Error("CreatedAt should not be zero")
+	if page.Summary != "Go is a language." {
+		t.Errorf("Summary = %q, want %q", page.Summary, "Go is a language.")
+	}
+	if page.Content != "## Overview\nGo is open source." {
+		t.Errorf("Content = %q", page.Content)
+	}
+	if page.DatePublished != nil || page.DateModified != nil {
+		t.Error("expected nil dates")
 	}
 }
 
@@ -43,26 +61,32 @@ func TestPageDAO_Upsert_Update(t *testing.T) {
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
 
-	first := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
-	original, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/Go", "<html>old</html>", first)
+	original, err := dao.Upsert(ctx,
+		"https://en.wikipedia.org/wiki/Go",
+		"en", "Go", "Old summary.", "Old content.",
+		nil, nil,
+	)
 	if err != nil {
 		t.Fatalf("first Upsert: %v", err)
 	}
 
-	second := time.Now().UTC().Truncate(time.Millisecond)
-	updated, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/Go", "<html>new</html>", second)
+	updated, err := dao.Upsert(ctx,
+		"https://en.wikipedia.org/wiki/Go",
+		"en", "Go (programming language)", "New summary.", "New content.",
+		nil, nil,
+	)
 	if err != nil {
 		t.Fatalf("second Upsert: %v", err)
 	}
 
-	if updated.RawHTML != "<html>new</html>" {
-		t.Errorf("RawHTML = %q, want updated value", updated.RawHTML)
+	if updated.ID != original.ID {
+		t.Errorf("ID changed on update: got %d, want %d", updated.ID, original.ID)
 	}
-	if !updated.LastScrapedAt.Equal(second) {
-		t.Errorf("LastScrapedAt not updated: got %v, want %v", updated.LastScrapedAt, second)
+	if updated.Title != "Go (programming language)" {
+		t.Errorf("Title not updated: got %q", updated.Title)
 	}
-	if !updated.CreatedAt.Equal(original.CreatedAt) {
-		t.Errorf("CreatedAt changed on update: got %v, want %v", updated.CreatedAt, original.CreatedAt)
+	if updated.Content != "New content." {
+		t.Errorf("Content not updated: got %q", updated.Content)
 	}
 }
 
@@ -72,9 +96,8 @@ func TestPageDAO_FindByURL_Found(t *testing.T) {
 
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
-	now := time.Now().UTC().Truncate(time.Millisecond)
 
-	inserted, _ := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/Rust", "<html>Rust</html>", now)
+	inserted := upsertTestPage(t, ctx, dao, "https://en.wikipedia.org/wiki/Rust")
 
 	found, err := dao.FindByURL(ctx, "https://en.wikipedia.org/wiki/Rust")
 	if err != nil {
@@ -104,42 +127,6 @@ func TestPageDAO_FindByURL_NotFound(t *testing.T) {
 	}
 }
 
-func TestPageDAO_FindOldestScraped(t *testing.T) {
-	truncateTables(t)
-	runMigrations(t)
-
-	ctx := context.Background()
-	dao := &PageDAO{pool: testPool}
-
-	base := time.Now().UTC().Truncate(time.Millisecond)
-	urls := []string{
-		"https://en.wikipedia.org/wiki/A",
-		"https://en.wikipedia.org/wiki/B",
-		"https://en.wikipedia.org/wiki/C",
-	}
-	for i, u := range urls {
-		// Insert with descending scraped times so A is newest, C is oldest.
-		scrapedAt := base.Add(-time.Duration(i) * time.Hour)
-		if _, err := dao.Upsert(ctx, u, "<html/>", scrapedAt); err != nil {
-			t.Fatalf("Upsert %s: %v", u, err)
-		}
-	}
-
-	pages, err := dao.FindOldestScraped(ctx, 2)
-	if err != nil {
-		t.Fatalf("FindOldestScraped: %v", err)
-	}
-	if len(pages) != 2 {
-		t.Fatalf("got %d pages, want 2", len(pages))
-	}
-	if pages[0].URL != "https://en.wikipedia.org/wiki/C" {
-		t.Errorf("first page = %q, want C (oldest)", pages[0].URL)
-	}
-	if pages[1].URL != "https://en.wikipedia.org/wiki/B" {
-		t.Errorf("second page = %q, want B", pages[1].URL)
-	}
-}
-
 func TestPageDAO_List(t *testing.T) {
 	truncateTables(t)
 	runMigrations(t)
@@ -147,12 +134,9 @@ func TestPageDAO_List(t *testing.T) {
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
 
-	now := time.Now().UTC().Truncate(time.Millisecond)
 	for i := 0; i < 5; i++ {
 		url := "https://en.wikipedia.org/wiki/Page" + string(rune('A'+i))
-		if _, err := dao.Upsert(ctx, url, "<html/>", now); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
+		upsertTestPage(t, ctx, dao, url)
 	}
 
 	page1, err := dao.List(ctx, 3, 0)
@@ -187,11 +171,8 @@ func TestPageDAO_Delete(t *testing.T) {
 
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
-	now := time.Now().UTC().Truncate(time.Millisecond)
 
-	if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/Python", "<html/>", now); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
+	upsertTestPage(t, ctx, dao, "https://en.wikipedia.org/wiki/Python")
 
 	if err := dao.Delete(ctx, "https://en.wikipedia.org/wiki/Python"); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -212,14 +193,9 @@ func TestPageDAO_FindWithoutQuestions_ReturnsUnprocessedPages(t *testing.T) {
 
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
-	now := time.Now().UTC().Truncate(time.Millisecond)
 
-	if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/A", "<html/>", now); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-	if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/B", "<html/>", now); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
+	upsertTestPage(t, ctx, dao, "https://en.wikipedia.org/wiki/A")
+	upsertTestPage(t, ctx, dao, "https://en.wikipedia.org/wiki/B")
 
 	pages, err := dao.FindWithoutQuestions(ctx, 10)
 	if err != nil {
@@ -237,15 +213,9 @@ func TestPageDAO_FindWithoutQuestions_ExcludesPagesWithQuestions(t *testing.T) {
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
 	qDAO := &QuestionDAO{pool: testPool}
-	now := time.Now().UTC().Truncate(time.Millisecond)
 
-	pageA, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/A", "<html/>", now)
-	if err != nil {
-		t.Fatalf("Upsert A: %v", err)
-	}
-	if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/B", "<html/>", now); err != nil {
-		t.Fatalf("Upsert B: %v", err)
-	}
+	pageA := upsertTestPage(t, ctx, dao, "https://en.wikipedia.org/wiki/A")
+	upsertTestPage(t, ctx, dao, "https://en.wikipedia.org/wiki/B")
 
 	choices := []Choice{
 		{Text: "A", Correct: true},
@@ -254,7 +224,7 @@ func TestPageDAO_FindWithoutQuestions_ExcludesPagesWithQuestions(t *testing.T) {
 		{Text: "D", Correct: false},
 		{Text: "E", Correct: false},
 	}
-	if _, err := qDAO.Insert(ctx, pageA.ID, "Q?", "en", choices); err != nil {
+	if _, err := qDAO.Insert(ctx, pageA.ID, "Q?", choices); err != nil {
 		t.Fatalf("Insert question: %v", err)
 	}
 
@@ -276,12 +246,9 @@ func TestPageDAO_FindWithoutQuestions_RespectsLimit(t *testing.T) {
 
 	ctx := context.Background()
 	dao := &PageDAO{pool: testPool}
-	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	for _, u := range []string{"A", "B", "C", "D", "E"} {
-		if _, err := dao.Upsert(ctx, "https://en.wikipedia.org/wiki/"+u, "<html/>", now); err != nil {
-			t.Fatalf("Upsert %s: %v", u, err)
-		}
+		upsertTestPage(t, ctx, dao, "https://en.wikipedia.org/wiki/"+u)
 	}
 
 	pages, err := dao.FindWithoutQuestions(ctx, 3)

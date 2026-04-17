@@ -49,7 +49,7 @@ func (w *ScrapeWorker) runTerm(ctx context.Context, term string) {
 			w.logger.Warn("scrape error", "term", term, "url", result.URL, "err", result.Err)
 			continue
 		}
-		if _, err := w.pages.Upsert(ctx, result.URL, result.HTML, result.Timestamp); err != nil {
+		if _, err := w.pages.Upsert(ctx, result.URL, result.Language, result.Title, result.Summary, result.Content, result.DatePublished, result.DateModified); err != nil {
 			w.logger.Error("upsert page", "url", result.URL, "err", err)
 		}
 	}

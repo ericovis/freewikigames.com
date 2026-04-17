@@ -15,10 +15,11 @@ type job struct {
 type workerPool struct {
 	workers int
 	client  *httpClient
+	enrich  func(ctx context.Context, rawURL, html string) ScrapeResult
 }
 
-func newWorkerPool(workers int, client *httpClient) *workerPool {
-	return &workerPool{workers: workers, client: client}
+func newWorkerPool(workers int, client *httpClient, enrich func(ctx context.Context, rawURL, html string) ScrapeResult) *workerPool {
+	return &workerPool{workers: workers, client: client, enrich: enrich}
 }
 
 // Run dispatches all urls as jobs across N worker goroutines and returns a
@@ -36,11 +37,11 @@ func (p *workerPool) Run(ctx context.Context, urls []string) <-chan ScrapeResult
 			defer wg.Done()
 			for j := range jobs {
 				html, err := p.client.Get(j.ctx, j.url)
-				result := ScrapeResult{
-					URL:       j.url,
-					HTML:      html,
-					Timestamp: time.Now(),
-					Err:       err,
+				var result ScrapeResult
+				if err != nil {
+					result = ScrapeResult{URL: j.url, Err: err, Timestamp: time.Now()}
+				} else {
+					result = p.enrich(j.ctx, j.url, html)
 				}
 				select {
 				case out <- result:
@@ -86,11 +87,11 @@ func (p *workerPool) RunStream(ctx context.Context, urls <-chan string) <-chan S
 			defer wg.Done()
 			for j := range jobs {
 				html, err := p.client.Get(j.ctx, j.url)
-				result := ScrapeResult{
-					URL:       j.url,
-					HTML:      html,
-					Timestamp: time.Now(),
-					Err:       err,
+				var result ScrapeResult
+				if err != nil {
+					result = ScrapeResult{URL: j.url, Err: err, Timestamp: time.Now()}
+				} else {
+					result = p.enrich(j.ctx, j.url, html)
 				}
 				select {
 				case out <- result:

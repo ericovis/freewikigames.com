@@ -1,6 +1,5 @@
 // Package scraper provides a Wikipedia scraping library with configurable
 // concurrency, rate limiting, link discovery, and search-based crawling.
-// It uses only Go's standard library — no third-party HTTP or parsing deps.
 //
 // All methods return a receive-only channel that is always eventually closed.
 // Errors are embedded in ScrapeResult.Err; the caller checks them inline:
@@ -12,15 +11,22 @@ package scraper
 
 import (
 	"context"
+	"net/http"
 	"time"
 )
 
-// ScrapeResult holds the outcome of scraping one URL.
+// ScrapeResult holds the structured outcome of scraping one Wikipedia page.
 type ScrapeResult struct {
-	URL       string
-	HTML      string
-	Timestamp time.Time
-	Err       error
+	URL           string
+	Language      string
+	Title         string
+	Summary       string
+	Content       string     // markdown converted from #bodyContent element
+	DatePublished *time.Time // from JSON-LD, nil if absent
+	DateModified  *time.Time // from JSON-LD, nil if absent
+	Timestamp     time.Time
+	Err           error
+	rawHTML       string // unexported; used by CrawlFromURL for link discovery
 }
 
 // Config holds all tunable parameters for a WikipediaScraper.
@@ -79,18 +85,41 @@ type Scraper interface {
 
 // WikipediaScraper is the standard implementation of Scraper.
 type WikipediaScraper struct {
-	cfg    Config
-	client *httpClient
-	pool   *workerPool
+	cfg           Config
+	client        *httpClient
+	pool          *workerPool
+	summaryClient *http.Client
 }
 
 // New constructs a WikipediaScraper with the given Config.
 func New(cfg Config) *WikipediaScraper {
 	c := newHTTPClient(cfg.Timeout, cfg.RPS)
-	return &WikipediaScraper{
-		cfg:    cfg,
-		client: c,
-		pool:   newWorkerPool(cfg.MaxWorkers, c),
+	s := &WikipediaScraper{
+		cfg:           cfg,
+		client:        c,
+		summaryClient: &http.Client{Timeout: cfg.Timeout},
+	}
+	s.pool = newWorkerPool(cfg.MaxWorkers, c, s.buildResult)
+	return s
+}
+
+// buildResult extracts all structured fields from raw HTML and fetches the summary.
+func (s *WikipediaScraper) buildResult(ctx context.Context, rawURL, html string) ScrapeResult {
+	lang := extractLanguage(rawURL, html)
+	title, published, modified := extractJSONLD(html)
+	bodyHTML := extractBodyContent(html)
+	content := convertToMarkdown(bodyHTML)
+	summary := s.fetchSummary(ctx, lang, title)
+	return ScrapeResult{
+		URL:           rawURL,
+		Language:      lang,
+		Title:         title,
+		Summary:       summary,
+		Content:       content,
+		DatePublished: published,
+		DateModified:  modified,
+		Timestamp:     time.Now(),
+		rawHTML:       html,
 	}
 }
 

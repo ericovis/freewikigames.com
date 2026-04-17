@@ -23,8 +23,8 @@ func testConfig(baseURL string) Config {
 	}
 }
 
-func TestScrapeURL_ReturnsHTMLAndTimestamp(t *testing.T) {
-	const body = "<html><body>hello world</body></html>"
+func TestScrapeURL_ReturnsResultAndTimestamp(t *testing.T) {
+	const body = `<html lang="en"><body>hello world</body></html>`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, body)
 	}))
@@ -45,14 +45,31 @@ func TestScrapeURL_ReturnsHTMLAndTimestamp(t *testing.T) {
 	if r.Err != nil {
 		t.Fatalf("unexpected error: %v", r.Err)
 	}
-	if r.HTML != body {
-		t.Errorf("HTML mismatch: got %q, want %q", r.HTML, body)
-	}
 	if r.Timestamp.IsZero() {
 		t.Error("expected non-zero timestamp")
 	}
 	if r.URL != srv.URL+"/wiki/Test" {
 		t.Errorf("URL mismatch: got %q, want %q", r.URL, srv.URL+"/wiki/Test")
+	}
+}
+
+func TestScrapeURL_ExtractsLanguageFromHTML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html lang="pt"><body>olá</body></html>`)
+	}))
+	defer srv.Close()
+
+	s := New(testConfig(srv.URL))
+	var results []ScrapeResult
+	for r := range s.ScrapeURL(context.Background(), srv.URL+"/wiki/Brasil") {
+		results = append(results, r)
+	}
+
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("unexpected result: %+v", results)
+	}
+	if results[0].Language != "pt" {
+		t.Errorf("Language = %q, want %q", results[0].Language, "pt")
 	}
 }
 
@@ -97,8 +114,6 @@ func TestScrapeURL_ContextCancellation_ChannelAlwaysClosed(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		once.Do(func() { close(ready) })
-		// Block until the request context is cancelled (client disconnects)
-		// so the test server doesn't linger after srv.Close().
 		select {
 		case <-r.Context().Done():
 		case <-time.After(10 * time.Second):
@@ -111,11 +126,9 @@ func TestScrapeURL_ContextCancellation_ChannelAlwaysClosed(t *testing.T) {
 
 	ch := s.ScrapeURL(ctx, srv.URL+"/wiki/Slow")
 
-	// Wait for the request to actually reach the server, then cancel.
 	<-ready
 	cancel()
 
-	// Range must complete (channel must be closed).
 	var results []ScrapeResult
 	for r := range ch {
 		results = append(results, r)

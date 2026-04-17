@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"testing"
-	"time"
 )
 
 func TestQuestionDAO_Insert_OK(t *testing.T) {
@@ -13,10 +12,7 @@ func TestQuestionDAO_Insert_OK(t *testing.T) {
 	dao := &QuestionDAO{pool: testPool}
 	pageDAO := &PageDAO{pool: testPool}
 
-	page, err := pageDAO.Upsert(ctx, "https://en.wikipedia.org/wiki/Go", "<html/>", time.Now())
-	if err != nil {
-		t.Fatalf("upsert page: %v", err)
-	}
+	page := upsertTestPage(t, ctx, pageDAO, "https://en.wikipedia.org/wiki/Go")
 
 	choices := []Choice{
 		{Text: "A", Correct: true},
@@ -26,7 +22,7 @@ func TestQuestionDAO_Insert_OK(t *testing.T) {
 		{Text: "E", Correct: false},
 	}
 
-	q, err := dao.Insert(ctx, page.ID, "What is Go?", "en", choices)
+	q, err := dao.Insert(ctx, page.ID, "What is Go?", choices)
 	if err != nil {
 		t.Fatalf("insert question: %v", err)
 	}
@@ -39,51 +35,11 @@ func TestQuestionDAO_Insert_OK(t *testing.T) {
 	if q.Text != "What is Go?" {
 		t.Errorf("expected text 'What is Go?', got %q", q.Text)
 	}
-	if q.Language != "en" {
-		t.Errorf("expected language 'en', got %q", q.Language)
-	}
 	if len(q.Choices) != 5 {
 		t.Errorf("expected 5 choices, got %d", len(q.Choices))
 	}
 	if !q.Choices[0].Correct {
 		t.Error("expected first choice to be correct")
-	}
-}
-
-func TestQuestionDAO_Insert_WithLanguage(t *testing.T) {
-	truncateTables(t)
-
-	ctx := context.Background()
-	dao := &QuestionDAO{pool: testPool}
-	pageDAO := &PageDAO{pool: testPool}
-
-	page, err := pageDAO.Upsert(ctx, "https://pt.wikipedia.org/wiki/Go", "<html/>", time.Now())
-	if err != nil {
-		t.Fatalf("upsert page: %v", err)
-	}
-
-	choices := []Choice{
-		{Text: "A", Correct: true},
-		{Text: "B", Correct: false},
-		{Text: "C", Correct: false},
-		{Text: "D", Correct: false},
-		{Text: "E", Correct: false},
-	}
-
-	q, err := dao.Insert(ctx, page.ID, "O que é Go?", "pt", choices)
-	if err != nil {
-		t.Fatalf("insert question: %v", err)
-	}
-	if q.Language != "pt" {
-		t.Errorf("expected language 'pt', got %q", q.Language)
-	}
-
-	found, err := dao.FindByID(ctx, q.ID)
-	if err != nil {
-		t.Fatalf("find by id: %v", err)
-	}
-	if found.Language != "pt" {
-		t.Errorf("expected persisted language 'pt', got %q", found.Language)
 	}
 }
 
@@ -109,10 +65,7 @@ func TestQuestionDAO_FindByPage(t *testing.T) {
 	dao := &QuestionDAO{pool: testPool}
 	pageDAO := &PageDAO{pool: testPool}
 
-	page, err := pageDAO.Upsert(ctx, "https://en.wikipedia.org/wiki/Go", "<html/>", time.Now())
-	if err != nil {
-		t.Fatalf("upsert page: %v", err)
-	}
+	page := upsertTestPage(t, ctx, pageDAO, "https://en.wikipedia.org/wiki/Go")
 
 	choices := []Choice{
 		{Text: "A", Correct: true},
@@ -122,10 +75,10 @@ func TestQuestionDAO_FindByPage(t *testing.T) {
 		{Text: "E", Correct: false},
 	}
 
-	if _, err := dao.Insert(ctx, page.ID, "Question one", "en", choices); err != nil {
+	if _, err := dao.Insert(ctx, page.ID, "Question one", choices); err != nil {
 		t.Fatalf("insert question 1: %v", err)
 	}
-	if _, err := dao.Insert(ctx, page.ID, "Question two", "en", choices); err != nil {
+	if _, err := dao.Insert(ctx, page.ID, "Question two", choices); err != nil {
 		t.Fatalf("insert question 2: %v", err)
 	}
 
@@ -145,10 +98,7 @@ func TestQuestionDAO_Delete(t *testing.T) {
 	dao := &QuestionDAO{pool: testPool}
 	pageDAO := &PageDAO{pool: testPool}
 
-	page, err := pageDAO.Upsert(ctx, "https://en.wikipedia.org/wiki/Go", "<html/>", time.Now())
-	if err != nil {
-		t.Fatalf("upsert page: %v", err)
-	}
+	page := upsertTestPage(t, ctx, pageDAO, "https://en.wikipedia.org/wiki/Go")
 
 	choices := []Choice{
 		{Text: "A", Correct: true},
@@ -158,7 +108,7 @@ func TestQuestionDAO_Delete(t *testing.T) {
 		{Text: "E", Correct: false},
 	}
 
-	q, err := dao.Insert(ctx, page.ID, "Delete me", "en", choices)
+	q, err := dao.Insert(ctx, page.ID, "Delete me", choices)
 	if err != nil {
 		t.Fatalf("insert question: %v", err)
 	}

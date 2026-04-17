@@ -17,19 +17,19 @@ type mockQuestionDAO struct {
 	inserted []db.Question
 }
 
-func (m *mockQuestionDAO) Insert(ctx context.Context, pageID int64, text, language string, choices []db.Choice) (*db.Question, error) {
-	q := db.Question{ID: int64(len(m.inserted) + 1), PageID: pageID, Text: text, Language: language, Choices: choices}
+func (m *mockQuestionDAO) Insert(ctx context.Context, pageID int64, text string, choices []db.Choice) (*db.Question, error) {
+	q := db.Question{ID: int64(len(m.inserted) + 1), PageID: pageID, Text: text, Choices: choices}
 	m.inserted = append(m.inserted, q)
 	return &q, nil
 }
 
 // mockGenerator satisfies questionGenerator for tests.
 type mockGenerator struct {
-	fn func(ctx context.Context, rawHTML, language string) ([]questions.Question, error)
+	fn func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error)
 }
 
-func (m *mockGenerator) GenerateWithLanguage(ctx context.Context, rawHTML, language string) ([]questions.Question, error) {
-	return m.fn(ctx, rawHTML, language)
+func (m *mockGenerator) GenerateWithLanguage(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
+	return m.fn(ctx, title, language, summary, content)
 }
 
 func fiveQChoices(correctIdx int) []questions.Choice {
@@ -41,7 +41,10 @@ func fiveQChoices(correctIdx int) []questions.Choice {
 }
 
 func TestQuestionWorker_Run_GeneratesAndStoresQuestions(t *testing.T) {
-	page := db.Page{ID: 1, URL: "https://en.wikipedia.org/wiki/Go", RawHTML: "<html/>"}
+	page := db.Page{
+		ID: 1, URL: "https://en.wikipedia.org/wiki/Go",
+		Language: "en", Title: "Go", Summary: "Go is a language.", Content: "## Overview\nGo is open source.",
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
@@ -51,13 +54,15 @@ func TestQuestionWorker_Run_GeneratesAndStoresQuestions(t *testing.T) {
 			if calls == 1 {
 				return []db.Page{page}, nil
 			}
-			// Cancel after the first batch has been processed.
 			cancel()
 			return nil, nil
 		},
 	}
 	qDAO := &mockQuestionDAO{}
-	gen := &mockGenerator{fn: func(ctx context.Context, rawHTML, language string) ([]questions.Question, error) {
+
+	var capturedLanguage string
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
+		capturedLanguage = language
 		return []questions.Question{
 			{Text: "Q1", Choices: fiveQChoices(0)},
 			{Text: "Q2", Choices: fiveQChoices(1)},
@@ -73,8 +78,8 @@ func TestQuestionWorker_Run_GeneratesAndStoresQuestions(t *testing.T) {
 	if len(qDAO.inserted) != 2 {
 		t.Errorf("expected 2 inserted questions, got %d", len(qDAO.inserted))
 	}
-	if qDAO.inserted[0].Language != "en" {
-		t.Errorf("expected language 'en', got %q", qDAO.inserted[0].Language)
+	if capturedLanguage != "en" {
+		t.Errorf("expected generator called with language 'en', got %q", capturedLanguage)
 	}
 }
 
@@ -87,7 +92,7 @@ func TestQuestionWorker_Run_PollesWhenNoPagesFound(t *testing.T) {
 		},
 	}
 	qDAO := &mockQuestionDAO{}
-	gen := &mockGenerator{fn: func(ctx context.Context, rawHTML, language string) ([]questions.Question, error) {
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
 		return nil, nil
 	}}
 
@@ -112,13 +117,13 @@ func TestQuestionWorker_Run_ExitsOnContextCancel(t *testing.T) {
 		},
 	}
 	qDAO := &mockQuestionDAO{}
-	gen := &mockGenerator{fn: func(ctx context.Context, rawHTML, language string) ([]questions.Question, error) {
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
 		return nil, nil
 	}}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	w := NewQuestionWorker(pages, qDAO, gen, logger)
-	w.pollInterval = time.Hour // long poll so exit is driven only by ctx
+	w.pollInterval = time.Hour
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -137,7 +142,10 @@ func TestQuestionWorker_Run_ExitsOnContextCancel(t *testing.T) {
 }
 
 func TestQuestionWorker_Run_LogsGeneratorError(t *testing.T) {
-	page := db.Page{ID: 1, URL: "https://en.wikipedia.org/wiki/Go", RawHTML: "<html/>"}
+	page := db.Page{
+		ID: 1, URL: "https://en.wikipedia.org/wiki/Go",
+		Language: "en", Title: "Go", Summary: "Go is a language.", Content: "## Overview",
+	}
 	calls := 0
 	pages := &mockPageDAO{
 		findWithoutQuestionsFn: func(ctx context.Context, limit int) ([]db.Page, error) {
@@ -149,7 +157,7 @@ func TestQuestionWorker_Run_LogsGeneratorError(t *testing.T) {
 		},
 	}
 	qDAO := &mockQuestionDAO{}
-	gen := &mockGenerator{fn: func(ctx context.Context, rawHTML, language string) ([]questions.Question, error) {
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
 		return nil, errors.New("ollama unavailable")
 	}}
 
@@ -162,7 +170,6 @@ func TestQuestionWorker_Run_LogsGeneratorError(t *testing.T) {
 
 	w.Run(ctx) //nolint:errcheck
 
-	// No questions should have been inserted despite a page being found.
 	if len(qDAO.inserted) != 0 {
 		t.Errorf("expected 0 inserted questions on generator error, got %d", len(qDAO.inserted))
 	}

@@ -77,9 +77,7 @@ func (w *QuestionWorker) Run(ctx context.Context) error {
 }
 
 func (w *QuestionWorker) processPage(ctx context.Context, page db.Page) {
-	lang := detectLanguage(page.URL, page.RawHTML)
-
-	qs, err := w.generator.GenerateWithLanguage(ctx, page.RawHTML, lang)
+	qs, err := w.generator.GenerateWithLanguage(ctx, page.Title, page.Language, page.Summary, page.Content)
 	if err != nil {
 		w.logger.Error("generate questions", "page_id", page.ID, "url", page.URL, "err", err)
 		return
@@ -90,11 +88,11 @@ func (w *QuestionWorker) processPage(ctx context.Context, page db.Page) {
 		for i, c := range q.Choices {
 			choices[i] = db.Choice{Text: c.Text, Correct: c.Correct}
 		}
-		if _, err := w.questions.Insert(ctx, page.ID, q.Text, lang, choices); err != nil {
+		if _, err := w.questions.Insert(ctx, page.ID, q.Text, choices); err != nil {
 			w.logger.Error("insert question", "page_id", page.ID, "err", err)
 		}
 	}
-	w.logger.Info("processed page", "page_id", page.ID, "url", page.URL, "language", lang, "questions", len(qs))
+	w.logger.Info("processed page", "page_id", page.ID, "url", page.URL, "language", page.Language, "questions", len(qs))
 }
 
 // sleep waits for pollInterval or ctx cancellation. Returns false if ctx was

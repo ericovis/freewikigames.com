@@ -42,7 +42,7 @@ func main() {
 	defer database.Close()
 
 	aiClient := ai.New(ollamaHost, ollamaModel)
-	generator := questions.New(aiClient)
+	generator := questions.New(aiClient, logger)
 
 	w := worker.NewQuestionWorker(database.Pages(), database.Questions(), generator, logger)
 	if err := w.Run(ctx); err != nil {

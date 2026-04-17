@@ -12,7 +12,7 @@ type mockAI struct {
 	fn func(ctx context.Context, prompt string, dst any) error
 }
 
-func (m *mockAI) GenerateJSON(ctx context.Context, prompt string, dst any) error {
+func (m *mockAI) GenerateJSONSchema(ctx context.Context, prompt string, schema any, dst any) error {
 	return m.fn(ctx, prompt, dst)
 }
 
@@ -135,10 +135,60 @@ func TestGenerator_GenerateWithLanguage_PromptContainsStructuredFields(t *testin
 	g := New(ai)
 	g.GenerateWithLanguage(context.Background(), "Go (programming language)", "pt", "Go is a language.", "## Overview\nGo is open source.")
 
-	for _, want := range []string{`"pt"`, "Title: Go (programming language)", "Go is a language.", "## Overview"} {
+	for _, want := range []string{"pt", "Article: Go (programming language)", "Go is a language.", "## Overview"} {
 		if !strings.Contains(capturedPrompt, want) {
 			t.Errorf("prompt missing %q\nfull prompt:\n%s", want, capturedPrompt)
 		}
+	}
+}
+
+func TestSplitSections_MultipleHeadings(t *testing.T) {
+	content := "## History\nGo was designed at Google in 2007 by Robert Griesemer, Rob Pike, and Ken Thompson to improve programming productivity.\n\n## Features\nGo includes garbage collection, limited structural typing, memory safety, and CSP-style concurrent programming features."
+	chunks := splitSections(content)
+	if len(chunks) != 2 {
+		t.Errorf("expected 2 chunks, got %d: %v", len(chunks), chunks)
+	}
+	if !strings.HasPrefix(chunks[0], "## History") {
+		t.Errorf("expected first chunk to start with '## History', got %q", chunks[0])
+	}
+	if !strings.HasPrefix(chunks[1], "## Features") {
+		t.Errorf("expected second chunk to start with '## Features', got %q", chunks[1])
+	}
+}
+
+func TestSplitSections_NoHeadingsFallback(t *testing.T) {
+	content := "Just plain content without any section headings."
+	chunks := splitSections(content)
+	if len(chunks) != 1 {
+		t.Errorf("expected 1 chunk (fallback), got %d", len(chunks))
+	}
+	if chunks[0] != content {
+		t.Errorf("expected chunk to equal content, got %q", chunks[0])
+	}
+}
+
+func TestSplitSections_SkipsBoilerplate(t *testing.T) {
+	content := "## History\nGo was designed at Google in 2007 by Robert Griesemer, Rob Pike, and Ken Thompson.\n\n## See also\nSome links here.\n\n## References\nLots of citations.\n\n## Features\nGo includes garbage collection and CSP-style concurrent programming features added here."
+	chunks := splitSections(content)
+	for _, c := range chunks {
+		if strings.Contains(c, "## See also") || strings.Contains(c, "## References") {
+			t.Errorf("boilerplate section should have been skipped, got chunk: %q", c)
+		}
+	}
+	if len(chunks) != 2 {
+		t.Errorf("expected 2 chunks (History + Features), got %d", len(chunks))
+	}
+}
+
+func TestSplitSections_SkipsShortChunks(t *testing.T) {
+	// "## Tiny" alone is < 80 chars and has no body — should be skipped
+	content := "## Tiny\n\n## Real section\nThis section has enough text to be included as a valid chunk in the output."
+	chunks := splitSections(content)
+	if len(chunks) != 1 {
+		t.Errorf("expected 1 chunk (short section skipped), got %d: %v", len(chunks), chunks)
+	}
+	if !strings.HasPrefix(chunks[0], "## Real section") {
+		t.Errorf("expected surviving chunk to be '## Real section', got %q", chunks[0])
 	}
 }
 

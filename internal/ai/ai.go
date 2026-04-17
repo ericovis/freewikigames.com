@@ -31,7 +31,7 @@ type generateRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
 	Stream bool   `json:"stream"`
-	Format string `json:"format"`
+	Format any    `json:"format"`
 }
 
 // generateResponse is the shape of a completed (non-streamed) Ollama reply.
@@ -43,11 +43,23 @@ type generateResponse struct {
 // GenerateJSON sends a prompt to Ollama with format:"json", reads the
 // completed response, and unmarshals the JSON text into dst (must be a pointer).
 func (c *Client) GenerateJSON(ctx context.Context, prompt string, dst any) error {
+	return c.generate(ctx, prompt, "json", dst)
+}
+
+// GenerateJSONSchema sends a prompt to Ollama with a JSON Schema as the format
+// constraint, forcing the model to produce output that matches the schema.
+// schema must be a JSON-serialisable value representing a JSON Schema object.
+// dst must be a pointer that the JSON response will be unmarshalled into.
+func (c *Client) GenerateJSONSchema(ctx context.Context, prompt string, schema any, dst any) error {
+	return c.generate(ctx, prompt, schema, dst)
+}
+
+func (c *Client) generate(ctx context.Context, prompt string, format any, dst any) error {
 	reqBody := generateRequest{
 		Model:  c.model,
 		Prompt: prompt,
 		Stream: false,
-		Format: "json",
+		Format: format,
 	}
 
 	encoded, err := json.Marshal(reqBody)

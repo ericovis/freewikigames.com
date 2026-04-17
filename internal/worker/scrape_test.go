@@ -16,7 +16,7 @@ type mockScraper struct {
 	results []scraper.ScrapeResult
 }
 
-func (m *mockScraper) SearchAndCrawl(ctx context.Context, term string) <-chan scraper.ScrapeResult {
+func (m *mockScraper) ScrapeURLs(ctx context.Context, urls []string) <-chan scraper.ScrapeResult {
 	ch := make(chan scraper.ScrapeResult, len(m.results))
 	for _, r := range m.results {
 		ch <- r
@@ -51,7 +51,7 @@ func TestScrapeWorker_Run_StoresResults(t *testing.T) {
 	pages := &mockPageDAO{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	w := NewScrapeWorker([]string{"test term"}, sc, pages, logger)
+	w := NewScrapeWorker([]string{"https://en.wikipedia.org/wiki/A", "https://en.wikipedia.org/wiki/B"}, sc, pages, logger)
 	if err := w.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestScrapeWorker_Run_SkipsErrors(t *testing.T) {
 	pages := &mockPageDAO{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	w := NewScrapeWorker([]string{"test term"}, sc, pages, logger)
+	w := NewScrapeWorker([]string{"https://en.wikipedia.org/wiki/A", "https://en.wikipedia.org/wiki/B"}, sc, pages, logger)
 	if err := w.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestScrapeWorker_Run_ExitsOnContextCancel(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		w := NewScrapeWorker([]string{"test"}, sc, pages, logger)
+		w := NewScrapeWorker([]string{"https://en.wikipedia.org/wiki/Test"}, sc, pages, logger)
 		done <- w.Run(ctx)
 	}()
 
@@ -113,7 +113,7 @@ type blockingScraper struct {
 	ch chan scraper.ScrapeResult
 }
 
-func (b *blockingScraper) SearchAndCrawl(ctx context.Context, term string) <-chan scraper.ScrapeResult {
+func (b *blockingScraper) ScrapeURLs(ctx context.Context, urls []string) <-chan scraper.ScrapeResult {
 	out := make(chan scraper.ScrapeResult)
 	go func() {
 		<-ctx.Done()

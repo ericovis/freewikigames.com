@@ -99,11 +99,78 @@ func TestExtractBodyContent_FindsDiv(t *testing.T) {
 	}
 }
 
+func TestExtractBodyContent_ExcludesFiguresAndTables(t *testing.T) {
+	rawHTML := `<html><body>
+<div id="bodyContent">
+  <p>Keep this text.</p>
+  <figure><img src="photo.jpg"/><figcaption>A caption</figcaption></figure>
+  <table><tr><td>row data</td></tr></table>
+  <p>And this text.</p>
+</div>
+</body></html>`
+
+	result := extractBodyContent(rawHTML)
+
+	if !strings.Contains(result, "Keep this text.") {
+		t.Errorf("expected body text to be kept, got: %q", result)
+	}
+	if !strings.Contains(result, "And this text.") {
+		t.Errorf("expected second paragraph to be kept, got: %q", result)
+	}
+	if strings.Contains(result, "<figure") || strings.Contains(result, "figcaption") || strings.Contains(result, "photo.jpg") {
+		t.Errorf("expected <figure> to be stripped, got: %q", result)
+	}
+	if strings.Contains(result, "<table") || strings.Contains(result, "row data") {
+		t.Errorf("expected <table> to be stripped, got: %q", result)
+	}
+}
+
 func TestExtractBodyContent_MissingDiv_ReturnsInput(t *testing.T) {
 	rawHTML := "<html><body><p>no bodyContent id here</p></body></html>"
 	result := extractBodyContent(rawHTML)
 	if result != rawHTML {
 		t.Errorf("expected original HTML back, got: %q", result)
+	}
+}
+
+func TestStripBoilerplateSections_RemovesKnownSections(t *testing.T) {
+	content := "## History\nGo was designed at Google in 2007 by Robert Griesemer, Rob Pike, and Ken Thompson.\n\n## See also\nSome links here.\n\n## References\nLots of citations.\n\n## Features\nGo includes garbage collection and CSP-style concurrent programming features."
+	result := stripBoilerplateSections(content)
+
+	if strings.Contains(result, "## See also") || strings.Contains(result, "Some links here") {
+		t.Errorf("expected 'See also' section to be stripped, got: %q", result)
+	}
+	if strings.Contains(result, "## References") || strings.Contains(result, "Lots of citations") {
+		t.Errorf("expected 'References' section to be stripped, got: %q", result)
+	}
+	if !strings.Contains(result, "## History") {
+		t.Errorf("expected 'History' section to be kept, got: %q", result)
+	}
+	if !strings.Contains(result, "## Features") {
+		t.Errorf("expected 'Features' section to be kept, got: %q", result)
+	}
+}
+
+func TestStripBoilerplateSections_PortugueseSections(t *testing.T) {
+	content := "## Biografia\nTexto sobre a vida.\n\n## Ver também\nOutros artigos.\n\n## Referências\nCitações aqui."
+	result := stripBoilerplateSections(content)
+
+	if strings.Contains(result, "Ver também") || strings.Contains(result, "Outros artigos") {
+		t.Errorf("expected 'Ver também' to be stripped, got: %q", result)
+	}
+	if strings.Contains(result, "Referências") || strings.Contains(result, "Citações aqui") {
+		t.Errorf("expected 'Referências' to be stripped, got: %q", result)
+	}
+	if !strings.Contains(result, "## Biografia") {
+		t.Errorf("expected 'Biografia' section to be kept, got: %q", result)
+	}
+}
+
+func TestStripBoilerplateSections_NoBoilerplate(t *testing.T) {
+	content := "## History\nSome facts.\n\n## Features\nMore facts."
+	result := stripBoilerplateSections(content)
+	if result != content {
+		t.Errorf("expected content unchanged, got: %q", result)
 	}
 }
 

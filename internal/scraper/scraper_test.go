@@ -10,17 +10,9 @@ import (
 	"time"
 )
 
-// testConfig returns a Config pointed at baseURL with settings suitable for
-// fast local tests: high RPS, short timeout, limited concurrency.
-func testConfig(baseURL string) Config {
-	return Config{
-		MaxWorkers: 2,
-		RPS:        50,
-		MaxDepth:   1,
-		MaxPages:   10,
-		Timeout:    5 * time.Second,
-		BaseURL:    baseURL,
-	}
+// testConfig returns a Config with a short timeout suitable for local tests.
+func testConfig() Config {
+	return Config{Timeout: 5 * time.Second}
 }
 
 func TestScrapeURL_ReturnsResultAndTimestamp(t *testing.T) {
@@ -30,7 +22,7 @@ func TestScrapeURL_ReturnsResultAndTimestamp(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := New(testConfig(srv.URL))
+	s := New(testConfig())
 	ctx := context.Background()
 
 	var results []ScrapeResult
@@ -59,7 +51,7 @@ func TestScrapeURL_ExtractsLanguageFromHTML(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := New(testConfig(srv.URL))
+	s := New(testConfig())
 	var results []ScrapeResult
 	for r := range s.ScrapeURL(context.Background(), srv.URL+"/wiki/Brasil") {
 		results = append(results, r)
@@ -85,7 +77,7 @@ func TestScrapeURLs_ReturnsOneResultPerURL(t *testing.T) {
 		urls[i] = srv.URL + p
 	}
 
-	s := New(testConfig(srv.URL))
+	s := New(testConfig())
 	ctx := context.Background()
 
 	results := make(map[string]ScrapeResult)
@@ -121,7 +113,7 @@ func TestScrapeURL_ContextCancellation_ChannelAlwaysClosed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := New(testConfig(srv.URL))
+	s := New(testConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ch := s.ScrapeURL(ctx, srv.URL+"/wiki/Slow")
@@ -147,7 +139,7 @@ func TestScrapeURL_HTTPError_SurfacedAsErr(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := New(testConfig(srv.URL))
+	s := New(testConfig())
 	ctx := context.Background()
 
 	var results []ScrapeResult
@@ -169,7 +161,7 @@ func TestScrapeURLs_EmptyList_ChannelClosedImmediately(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := New(testConfig(srv.URL))
+	s := New(testConfig())
 	ctx := context.Background()
 
 	var count int

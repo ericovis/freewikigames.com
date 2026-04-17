@@ -149,22 +149,8 @@ func (g *Generator) generateForSection(ctx context.Context, title, language, sum
 	return valid, nil
 }
 
-// boilerplateSections is a set of lowercased section titles that never contain
-// trivia-worthy facts and should be skipped during question generation.
-var boilerplateSections = map[string]bool{
-	// English
-	"see also": true, "references": true, "external links": true,
-	"notes": true, "bibliography": true, "further reading": true,
-	"footnotes": true, "sources": true, "citations": true,
-	// Portuguese
-	"ver também": true, "referências": true, "ligações externas": true,
-	"notas": true, "bibliografia": true, "leitura adicional": true,
-	"leitura complementar": true, "notas de rodapé": true, "fontes": true,
-}
-
 // splitSections splits markdown content into chunks on ## and ### headings.
 // Content before the first heading is included as a chunk if long enough.
-// Sections whose titles appear in boilerplateSections are skipped entirely.
 // Chunks shorter than minChunkLen characters are skipped (just a heading, no body).
 // If no sections are found, the entire content is returned as a single chunk.
 func splitSections(content string) []string {
@@ -172,24 +158,18 @@ func splitSections(content string) []string {
 	lines := strings.Split(content, "\n")
 	var chunks []string
 	var current []string
-	skipCurrent := false
 
 	flush := func() {
-		if !skipCurrent {
-			chunk := strings.TrimSpace(strings.Join(current, "\n"))
-			if len(chunk) >= minChunkLen {
-				chunks = append(chunks, chunk)
-			}
+		chunk := strings.TrimSpace(strings.Join(current, "\n"))
+		if len(chunk) >= minChunkLen {
+			chunks = append(chunks, chunk)
 		}
 		current = current[:0]
-		skipCurrent = false
 	}
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
 			flush()
-			title := strings.ToLower(strings.TrimLeft(line, "# "))
-			skipCurrent = boilerplateSections[title]
 		}
 		current = append(current, line)
 	}

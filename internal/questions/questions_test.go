@@ -167,19 +167,6 @@ func TestSplitSections_NoHeadingsFallback(t *testing.T) {
 	}
 }
 
-func TestSplitSections_SkipsBoilerplate(t *testing.T) {
-	content := "## History\nGo was designed at Google in 2007 by Robert Griesemer, Rob Pike, and Ken Thompson.\n\n## See also\nSome links here.\n\n## References\nLots of citations.\n\n## Features\nGo includes garbage collection and CSP-style concurrent programming features added here."
-	chunks := splitSections(content)
-	for _, c := range chunks {
-		if strings.Contains(c, "## See also") || strings.Contains(c, "## References") {
-			t.Errorf("boilerplate section should have been skipped, got chunk: %q", c)
-		}
-	}
-	if len(chunks) != 2 {
-		t.Errorf("expected 2 chunks (History + Features), got %d", len(chunks))
-	}
-}
-
 func TestSplitSections_SkipsShortChunks(t *testing.T) {
 	// "## Tiny" alone is < 80 chars and has no body — should be skipped
 	content := "## Tiny\n\n## Real section\nThis section has enough text to be included as a valid chunk in the output."

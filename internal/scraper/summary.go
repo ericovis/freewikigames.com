@@ -25,7 +25,7 @@ func (s *WikipediaScraper) fetchSummary(ctx context.Context, lang, title string)
 	}
 	req.Header.Set("User-Agent", "freewikigames-scraper/1.0")
 
-	resp, err := s.summaryClient.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return ""
 	}

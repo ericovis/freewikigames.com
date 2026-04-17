@@ -3,12 +3,10 @@ package worker
 import (
 	"context"
 	"log/slog"
-	"sync"
 )
 
-// ScrapeWorker runs CrawlFromURL for each of its start URLs concurrently,
-// upserting every scraped page into the database. It runs until ctx is
-// cancelled, at which point all goroutines exit and Run returns.
+// ScrapeWorker scrapes each of its URLs once and upserts the results into the
+// database. It runs until all URLs are processed or ctx is cancelled.
 type ScrapeWorker struct {
 	urls   []string
 	sc     scraperIface
@@ -26,25 +24,11 @@ func NewScrapeWorker(urls []string, sc scraperIface, pages pageDAO, logger *slog
 	}
 }
 
-// Run starts one goroutine per URL. Each goroutine ranges over the
-// CrawlFromURL result channel, upserting every successfully scraped page.
-// Run blocks until all goroutines exit (which happens when ctx is cancelled).
+// Run scrapes all URLs sequentially, upserting each successfully scraped page.
+// It blocks until all URLs are processed or ctx is cancelled.
 func (w *ScrapeWorker) Run(ctx context.Context) error {
-	var wg sync.WaitGroup
-	for _, url := range w.urls {
-		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-			w.runURL(ctx, url)
-		}(url)
-	}
-	wg.Wait()
-	return nil
-}
-
-func (w *ScrapeWorker) runURL(ctx context.Context, url string) {
-	w.logger.Info("scrape worker started", "url", url)
-	for result := range w.sc.CrawlFromURL(ctx, url) {
+	w.logger.Info("scrape worker started", "urls", len(w.urls))
+	for result := range w.sc.ScrapeURLs(ctx, w.urls) {
 		if result.Err != nil {
 			w.logger.Warn("scrape error", "url", result.URL, "err", result.Err)
 			continue
@@ -53,5 +37,6 @@ func (w *ScrapeWorker) runURL(ctx context.Context, url string) {
 			w.logger.Error("upsert page", "url", result.URL, "err", err)
 		}
 	}
-	w.logger.Info("scrape worker stopped", "url", url)
+	w.logger.Info("scrape worker stopped")
+	return nil
 }

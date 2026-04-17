@@ -67,7 +67,8 @@ func extractJSONLD(rawHTML string) (title string, published, modified *time.Time
 }
 
 // extractBodyContent parses rawHTML and returns the inner HTML of the element
-// with id="bodyContent". Returns rawHTML unchanged if the element is not found.
+// with id="bodyContent", with all <figure> and <table> elements removed.
+// Returns rawHTML unchanged if the element is not found.
 func extractBodyContent(rawHTML string) string {
 	doc, err := html.Parse(strings.NewReader(rawHTML))
 	if err != nil {
@@ -77,6 +78,7 @@ func extractBodyContent(rawHTML string) string {
 	if node == nil {
 		return rawHTML
 	}
+	removeNodesByTag(node, "figure", "table")
 	var buf strings.Builder
 	for c := node.FirstChild; c != nil; c = c.NextSibling {
 		if err := html.Render(&buf, c); err != nil {
@@ -84,6 +86,28 @@ func extractBodyContent(rawHTML string) string {
 		}
 	}
 	return buf.String()
+}
+
+// removeNodesByTag removes all descendant elements whose tag matches any of the
+// given names from the subtree rooted at n. The root node itself is never removed.
+func removeNodesByTag(n *html.Node, tags ...string) {
+	tagSet := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		tagSet[t] = true
+	}
+	var remove func(*html.Node)
+	remove = func(node *html.Node) {
+		var next *html.Node
+		for c := node.FirstChild; c != nil; c = next {
+			next = c.NextSibling
+			if c.Type == html.ElementNode && tagSet[c.Data] {
+				node.RemoveChild(c)
+			} else {
+				remove(c)
+			}
+		}
+	}
+	remove(n)
 }
 
 // findNodeByID does a depth-first search for the first HTML element whose id
@@ -112,4 +136,35 @@ func convertToMarkdown(rawHTML string) string {
 		return rawHTML
 	}
 	return md
+}
+
+// boilerplateSections is the set of lowercased Wikipedia section titles that
+// contain no trivia-worthy facts and should be removed from scraped content.
+var boilerplateSections = map[string]bool{
+	// English
+	"see also": true, "references": true, "external links": true,
+	"notes": true, "bibliography": true, "further reading": true,
+	"footnotes": true, "sources": true, "citations": true,
+	// Portuguese
+	"ver também": true, "referências": true, "ligações externas": true,
+	"notas": true, "bibliografia": true, "leitura adicional": true,
+	"leitura complementar": true, "notas de rodapé": true, "fontes": true,
+}
+
+// stripBoilerplateSections removes ## and ### sections whose titles appear in
+// boilerplateSections from a Markdown string, returning the cleaned result.
+func stripBoilerplateSections(markdown string) string {
+	lines := strings.Split(markdown, "\n")
+	var out []string
+	skip := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
+			title := strings.ToLower(strings.TrimLeft(line, "# "))
+			skip = boilerplateSections[title]
+		}
+		if !skip {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }

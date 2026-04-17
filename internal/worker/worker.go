@@ -33,7 +33,7 @@ type questionDAO interface {
 
 // scraperIface is the subset of scraper.Scraper used by ScrapeWorker.
 type scraperIface interface {
-	CrawlFromURL(ctx context.Context, startURL string) <-chan scraper.ScrapeResult
+	ScrapeURLs(ctx context.Context, urls []string) <-chan scraper.ScrapeResult
 }
 
 // questionGenerator is the interface for generating language-aware questions.

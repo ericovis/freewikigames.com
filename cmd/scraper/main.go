@@ -37,10 +37,7 @@ func main() {
 	}
 	defer database.Close()
 
-	cfg := scraper.DefaultConfig()
-	cfg.MaxPages = 0
-	cfg.MaxDepth = 0
-	sc := scraper.New(cfg)
+	sc := scraper.New(scraper.DefaultConfig())
 
 	w := worker.NewScrapeWorker(urls, sc, database.Pages(), logger)
 	if err := w.Run(ctx); err != nil {

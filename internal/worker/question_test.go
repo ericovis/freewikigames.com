@@ -25,11 +25,11 @@ func (m *mockQuestionDAO) Insert(ctx context.Context, pageID int64, text string,
 
 // mockGenerator satisfies questionGenerator for tests.
 type mockGenerator struct {
-	fn func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error)
+	fn func(ctx context.Context, title, language, content string) ([]questions.Question, error)
 }
 
-func (m *mockGenerator) GenerateWithLanguage(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
-	return m.fn(ctx, title, language, summary, content)
+func (m *mockGenerator) GenerateWithLanguage(ctx context.Context, title, language, content string) ([]questions.Question, error) {
+	return m.fn(ctx, title, language, content)
 }
 
 func fiveQChoices(correctIdx int) []questions.Choice {
@@ -61,7 +61,7 @@ func TestQuestionWorker_Run_GeneratesAndStoresQuestions(t *testing.T) {
 	qDAO := &mockQuestionDAO{}
 
 	var capturedLanguage string
-	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, content string) ([]questions.Question, error) {
 		capturedLanguage = language
 		return []questions.Question{
 			{Text: "Q1", Choices: fiveQChoices(0)},
@@ -92,7 +92,7 @@ func TestQuestionWorker_Run_PollesWhenNoPagesFound(t *testing.T) {
 		},
 	}
 	qDAO := &mockQuestionDAO{}
-	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, content string) ([]questions.Question, error) {
 		return nil, nil
 	}}
 
@@ -117,7 +117,7 @@ func TestQuestionWorker_Run_ExitsOnContextCancel(t *testing.T) {
 		},
 	}
 	qDAO := &mockQuestionDAO{}
-	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, content string) ([]questions.Question, error) {
 		return nil, nil
 	}}
 
@@ -157,7 +157,7 @@ func TestQuestionWorker_Run_LogsGeneratorError(t *testing.T) {
 		},
 	}
 	qDAO := &mockQuestionDAO{}
-	gen := &mockGenerator{fn: func(ctx context.Context, title, language, summary, content string) ([]questions.Question, error) {
+	gen := &mockGenerator{fn: func(ctx context.Context, title, language, content string) ([]questions.Question, error) {
 		return nil, errors.New("ollama unavailable")
 	}}
 

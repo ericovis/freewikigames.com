@@ -26,16 +26,20 @@ func fiveChoices(correctIdx int) []Choice {
 
 func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
 	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
-		resp := dst.(*llmResponse)
-		resp.Questions = []Question{
-			{Text: "Q1", Choices: fiveChoices(0)},
-			{Text: "Q2", Choices: fiveChoices(2)},
+		switch d := dst.(type) {
+		case *llmResponse:
+			d.Questions = []Question{
+				{Text: "Q1", Choices: fiveChoices(0)},
+				{Text: "Q2", Choices: fiveChoices(2)},
+			}
+		case *reviewResponse:
+			d.Verdict = "accept"
 		}
 		return nil
 	}}
 
 	g := New(ai)
-	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "Go is a language.", "## Overview\nGo is open source.")
+	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "## Overview\nGo is open source.")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,16 +50,20 @@ func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
 
 func TestGenerator_GenerateWithLanguage_SkipsInvalidChoiceCount(t *testing.T) {
 	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
-		resp := dst.(*llmResponse)
-		resp.Questions = []Question{
-			{Text: "Bad Q", Choices: []Choice{{Text: "A", Correct: true}}},
-			{Text: "Good Q", Choices: fiveChoices(1)},
+		switch d := dst.(type) {
+		case *llmResponse:
+			d.Questions = []Question{
+				{Text: "Bad Q", Choices: []Choice{{Text: "A", Correct: true}}},
+				{Text: "Good Q", Choices: fiveChoices(1)},
+			}
+		case *reviewResponse:
+			d.Verdict = "accept"
 		}
 		return nil
 	}}
 
 	g := New(ai)
-	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "summary", "content")
+	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "content")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +88,7 @@ func TestGenerator_GenerateWithLanguage_SkipsTwoCorrect(t *testing.T) {
 	}}
 
 	g := New(ai)
-	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "summary", "content")
+	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "content")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +112,7 @@ func TestGenerator_GenerateWithLanguage_SkipsZeroCorrect(t *testing.T) {
 	}}
 
 	g := New(ai)
-	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "summary", "content")
+	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "content")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,7 +127,7 @@ func TestGenerator_GenerateWithLanguage_PropagatesAIError(t *testing.T) {
 	}}
 
 	g := New(ai)
-	_, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "summary", "content")
+	_, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "content")
 	if err == nil {
 		t.Fatal("expected error from AI client, got nil")
 	}
@@ -133,9 +141,9 @@ func TestGenerator_GenerateWithLanguage_PromptContainsStructuredFields(t *testin
 	}}
 
 	g := New(ai)
-	g.GenerateWithLanguage(context.Background(), "Go (programming language)", "pt", "Go is a language.", "## Overview\nGo is open source.")
+	g.GenerateWithLanguage(context.Background(), "Go (programming language)", "pt", "## Overview\nGo is open source.")
 
-	for _, want := range []string{"pt", "Article: Go (programming language)", "Go is a language.", "## Overview"} {
+	for _, want := range []string{"pt", "Subject: Go (programming language)", "## Overview"} {
 		if !strings.Contains(capturedPrompt, want) {
 			t.Errorf("prompt missing %q\nfull prompt:\n%s", want, capturedPrompt)
 		}

@@ -12,8 +12,10 @@ This package has no database dependency. Persisting questions to PostgreSQL is t
 
 | File               | Responsibility                                                |
 |--------------------|---------------------------------------------------------------|
-| `questions.go`     | `Choice`, `Question`, `Generator`, `Generate()`, `validate()`, `stripHTML()` |
-| `questions_test.go`| Unit tests using a mock `aiClient`; no real network or DB     |
+| `questions.go`     | `Choice`, `Question`, `Generator`, `GenerateWithLanguage()`, `validate()`, `splitSections()` |
+| `review.go`        | `reviewQuestion()` — LLM quality-review step (accept / improve / reject) |
+| `questions_test.go`| Unit tests for generation and the full pipeline               |
+| `review_test.go`   | Unit tests for the review step in isolation                   |
 | `QUESTIONS.md`     | This developer guide                                          |
 
 ## Key Types
@@ -62,14 +64,25 @@ The prompt instructs the model to return **only** a JSON object matching this sc
 
 The `format: "json"` flag in the Ollama request instructs the model to output valid JSON. The `response` field from Ollama is then unmarshalled into `llmResponse`.
 
-## Validation Rules
+## Generation Pipeline
+
+Each article section goes through two LLM calls before a question is kept:
+
+1. **Generation** (`generateForSection`) — the LLM writes 1–2 questions from the section text.
+2. **Structural validation** (`validate`) — exactly 5 choices, exactly 1 correct; structurally invalid questions are dropped silently.
+3. **Quality review** (`reviewQuestion`) — a second LLM call presents the question with the correct answer marked and asks the model to verify factual accuracy, clarity, and plausible distractors. The model returns one of three verdicts:
+   - `accept` — question is kept as-is.
+   - `improve` — model returns a revised question; if it passes `validate` the revision is used, otherwise the original is kept.
+   - `reject` — question is dropped.
+
+On review error (transient LLM failure) the original question is kept so a flaky Ollama instance does not silently discard content.
+
+## Structural Validation Rules
 
 `validate(q Question) error` enforces:
 
 1. **Exactly 5 choices** — questions with more or fewer are silently skipped.
 2. **Exactly 1 correct choice** — questions with 0 or 2+ correct answers are silently skipped.
-
-Invalid questions are dropped rather than returned as errors, because partial output from the LLM should not abort the entire generation run.
 
 ## HTML Stripping
 

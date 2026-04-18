@@ -77,7 +77,7 @@ func (w *QuestionWorker) Run(ctx context.Context) error {
 }
 
 func (w *QuestionWorker) processPage(ctx context.Context, page db.Page) {
-	qs, err := w.generator.GenerateWithLanguage(ctx, page.Title, page.Language, page.Summary, page.Content)
+	qs, err := w.generator.GenerateWithLanguage(ctx, page.Title, page.Language, page.Content)
 	if err != nil {
 		w.logger.Error("generate questions", "page_id", page.ID, "url", page.URL, "err", err)
 		return

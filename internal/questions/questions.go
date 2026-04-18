@@ -81,24 +81,22 @@ func New(ai aiClient, loggers ...*slog.Logger) *Generator {
 }
 
 // sectionPromptTemplate is the per-section prompt sent to the LLM.
-// Parameters: language, title, summary, section content.
-const sectionPromptTemplate = `You are a trivia writer. Read the Wikipedia section below and write 1 to 2 multiple-choice questions about specific facts in it.
+// Parameters: language, title, section content.
+const sectionPromptTemplate = `You are a trivia writer. 
+Read the Wikipedia section below and write multiple-choice questions about specific facts in it.
 
 Rules:
 - Each question must have exactly 5 answer choices.
 - Exactly 1 choice must be correct ("correct": true); the other 4 must be incorrect ("correct": false).
 - Write questions in %s (ISO 639-1 language code).
 
-Article: %s
-Summary: %s
-
-Section:
+Subject: %s
 %s`
 
 // GenerateWithLanguage generates trivia questions from structured article data
 // by splitting the content into sections and querying the LLM once per section.
 // language is an ISO 639-1 code (e.g. "en", "pt", "de").
-func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, summary, content string) ([]Question, error) {
+func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, content string) ([]Question, error) {
 	chunks := splitSections(content)
 	g.logger.Info("generating questions", "title", title, "sections", len(chunks))
 
@@ -109,7 +107,7 @@ func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, s
 		if ctx.Err() != nil {
 			break
 		}
-		qs, err := g.generateForSection(ctx, title, language, summary, chunk)
+		qs, err := g.generateForSection(ctx, title, language, chunk)
 		if err != nil {
 			g.logger.Warn("section generation failed", "title", title, "section", i+1, "err", err)
 			lastErr = err
@@ -127,8 +125,8 @@ func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, s
 	return allQuestions, nil
 }
 
-func (g *Generator) generateForSection(ctx context.Context, title, language, summary, chunk string) ([]Question, error) {
-	prompt := fmt.Sprintf(sectionPromptTemplate, language, title, summary, chunk)
+func (g *Generator) generateForSection(ctx context.Context, title, language, chunk string) ([]Question, error) {
+	prompt := fmt.Sprintf(sectionPromptTemplate, language, title, chunk)
 
 	var resp llmResponse
 	if err := g.ai.GenerateJSONSchema(ctx, prompt, responseSchema, &resp); err != nil {
@@ -143,7 +141,17 @@ func (g *Generator) generateForSection(ctx context.Context, title, language, sum
 			g.logger.Debug("question discarded", "title", title, "reason", err)
 			continue
 		}
-		valid = append(valid, q)
+		reviewed, keep, err := g.reviewQuestion(ctx, title, q)
+		if err != nil {
+			g.logger.Warn("question review failed, keeping original", "title", title, "err", err)
+			valid = append(valid, q)
+			continue
+		}
+		if !keep {
+			g.logger.Debug("question rejected by review", "title", title, "question", q.Text)
+			continue
+		}
+		valid = append(valid, reviewed)
 	}
 	g.logger.Debug("questions validated", "title", title, "valid", len(valid), "raw", len(resp.Questions))
 	return valid, nil

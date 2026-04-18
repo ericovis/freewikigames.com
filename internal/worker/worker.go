@@ -38,5 +38,5 @@ type scraperIface interface {
 
 // questionGenerator is the interface for generating language-aware questions.
 type questionGenerator interface {
-	GenerateWithLanguage(ctx context.Context, title, language, summary, content string) ([]questions.Question, error)
+	GenerateWithLanguage(ctx context.Context, title, language, content string) ([]questions.Question, error)
 }

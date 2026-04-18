@@ -5,15 +5,27 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/ericovis/freewikigames.com/internal/ai"
 )
 
-// mockAI implements aiClient for tests.
-type mockAI struct {
-	fn func(ctx context.Context, prompt string, dst any) error
+// mockSession implements ai.Session for tests.
+type mockSession struct {
+	fn func(ctx context.Context, message string, dst any) error
 }
 
-func (m *mockAI) GenerateJSONSchema(ctx context.Context, prompt string, schema any, dst any) error {
-	return m.fn(ctx, prompt, dst)
+func (m *mockSession) Send(ctx context.Context, message string, dst any) error {
+	return m.fn(ctx, message, dst)
+}
+
+// mockAI implements aiClient for tests.
+// Every NewChat call returns a session backed by the same fn.
+type mockAI struct {
+	fn func(ctx context.Context, message string, dst any) error
+}
+
+func (m *mockAI) NewChat(systemPrompt string) ai.Session {
+	return &mockSession{fn: m.fn}
 }
 
 func fiveChoices(correctIdx int) []Choice {
@@ -25,7 +37,7 @@ func fiveChoices(correctIdx int) []Choice {
 }
 
 func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
-	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
+	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
 		switch d := dst.(type) {
 		case *llmResponse:
 			d.Questions = []Question{
@@ -39,7 +51,7 @@ func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
 	}}
 
 	g := New(ai)
-	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "## Overview\nGo is open source.")
+	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "Go is open source.")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,7 +61,7 @@ func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
 }
 
 func TestGenerator_GenerateWithLanguage_SkipsInvalidChoiceCount(t *testing.T) {
-	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
+	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
 		switch d := dst.(type) {
 		case *llmResponse:
 			d.Questions = []Question{
@@ -79,10 +91,11 @@ func TestGenerator_GenerateWithLanguage_SkipsTwoCorrect(t *testing.T) {
 	choices := fiveChoices(0)
 	choices[1].Correct = true
 
-	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
-		resp := dst.(*llmResponse)
-		resp.Questions = []Question{
-			{Text: "Two correct", Choices: choices},
+	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
+		if resp, ok := dst.(*llmResponse); ok {
+			resp.Questions = []Question{
+				{Text: "Two correct", Choices: choices},
+			}
 		}
 		return nil
 	}}
@@ -103,10 +116,11 @@ func TestGenerator_GenerateWithLanguage_SkipsZeroCorrect(t *testing.T) {
 		choices[i] = Choice{Text: string(rune('A' + i)), Correct: false}
 	}
 
-	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
-		resp := dst.(*llmResponse)
-		resp.Questions = []Question{
-			{Text: "No correct", Choices: choices},
+	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
+		if resp, ok := dst.(*llmResponse); ok {
+			resp.Questions = []Question{
+				{Text: "No correct", Choices: choices},
+			}
 		}
 		return nil
 	}}
@@ -122,8 +136,8 @@ func TestGenerator_GenerateWithLanguage_SkipsZeroCorrect(t *testing.T) {
 }
 
 func TestGenerator_GenerateWithLanguage_PropagatesAIError(t *testing.T) {
-	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
-		return errors.New("ollama unavailable")
+	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
+		return errors.New("gemini unavailable")
 	}}
 
 	g := New(ai)
@@ -133,57 +147,98 @@ func TestGenerator_GenerateWithLanguage_PropagatesAIError(t *testing.T) {
 	}
 }
 
-func TestGenerator_GenerateWithLanguage_PromptContainsStructuredFields(t *testing.T) {
-	var capturedPrompt string
-	ai := &mockAI{fn: func(ctx context.Context, prompt string, dst any) error {
-		capturedPrompt = prompt
+func TestGenerator_GenerateWithLanguage_PromptContainsArticleFields(t *testing.T) {
+	var capturedMessage string
+	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
+		if _, ok := dst.(*llmResponse); ok && capturedMessage == "" {
+			capturedMessage = message
+		}
 		return nil
 	}}
 
 	g := New(ai)
-	g.GenerateWithLanguage(context.Background(), "Go (programming language)", "pt", "## Overview\nGo is open source.")
+	g.GenerateWithLanguage(context.Background(), "Go (programming language)", "pt", "Go is open source and fast.")
 
-	for _, want := range []string{"pt", "Subject: Go (programming language)", "## Overview"} {
-		if !strings.Contains(capturedPrompt, want) {
-			t.Errorf("prompt missing %q\nfull prompt:\n%s", want, capturedPrompt)
+	for _, want := range []string{"Go (programming language)", "Go is open source"} {
+		if !strings.Contains(capturedMessage, want) {
+			t.Errorf("prompt missing %q\nfull message:\n%s", want, capturedMessage)
 		}
 	}
 }
 
-func TestSplitSections_MultipleHeadings(t *testing.T) {
-	content := "## History\nGo was designed at Google in 2007 by Robert Griesemer, Rob Pike, and Ken Thompson to improve programming productivity.\n\n## Features\nGo includes garbage collection, limited structural typing, memory safety, and CSP-style concurrent programming features."
-	chunks := splitSections(content)
-	if len(chunks) != 2 {
-		t.Errorf("expected 2 chunks, got %d: %v", len(chunks), chunks)
+func TestGenerator_GenerateWithLanguage_SystemPromptContainsLanguage(t *testing.T) {
+	var capturedSystem string
+	mockClient := &captureSystemMockAI{
+		fn: func(ctx context.Context, message string, dst any) error {
+			if resp, ok := dst.(*llmResponse); ok {
+				resp.Questions = []Question{{Text: "Q", Choices: fiveChoices(0)}}
+			}
+			if resp, ok := dst.(*reviewResponse); ok {
+				resp.Verdict = "accept"
+			}
+			return nil
+		},
+		onNewChat: func(systemPrompt string) {
+			if capturedSystem == "" {
+				capturedSystem = systemPrompt
+			}
+		},
 	}
-	if !strings.HasPrefix(chunks[0], "## History") {
-		t.Errorf("expected first chunk to start with '## History', got %q", chunks[0])
-	}
-	if !strings.HasPrefix(chunks[1], "## Features") {
-		t.Errorf("expected second chunk to start with '## Features', got %q", chunks[1])
+
+	g := New(mockClient)
+	g.GenerateWithLanguage(context.Background(), "Go", "pt", "content")
+
+	if !strings.Contains(capturedSystem, "pt") {
+		t.Errorf("system prompt missing language 'pt', got:\n%s", capturedSystem)
 	}
 }
 
-func TestSplitSections_NoHeadingsFallback(t *testing.T) {
-	content := "Just plain content without any section headings."
-	chunks := splitSections(content)
-	if len(chunks) != 1 {
-		t.Errorf("expected 1 chunk (fallback), got %d", len(chunks))
-	}
-	if chunks[0] != content {
-		t.Errorf("expected chunk to equal content, got %q", chunks[0])
-	}
+// captureSystemMockAI captures the system prompt passed to NewChat.
+type captureSystemMockAI struct {
+	fn        func(ctx context.Context, message string, dst any) error
+	onNewChat func(systemPrompt string)
 }
 
-func TestSplitSections_SkipsShortChunks(t *testing.T) {
-	// "## Tiny" alone is < 80 chars and has no body — should be skipped
-	content := "## Tiny\n\n## Real section\nThis section has enough text to be included as a valid chunk in the output."
-	chunks := splitSections(content)
-	if len(chunks) != 1 {
-		t.Errorf("expected 1 chunk (short section skipped), got %d: %v", len(chunks), chunks)
+func (m *captureSystemMockAI) NewChat(systemPrompt string) ai.Session {
+	if m.onNewChat != nil {
+		m.onNewChat(systemPrompt)
 	}
-	if !strings.HasPrefix(chunks[0], "## Real section") {
-		t.Errorf("expected surviving chunk to be '## Real section', got %q", chunks[0])
+	return &mockSession{fn: m.fn}
+}
+
+func TestGenerator_GenerateWithLanguage_FollowsUpOnInvalidQuestions(t *testing.T) {
+	callCount := 0
+	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
+		switch d := dst.(type) {
+		case *llmResponse:
+			callCount++
+			if callCount == 1 {
+				// First call: return an invalid question (3 choices)
+				d.Questions = []Question{
+					{Text: "Bad Q", Choices: fiveChoices(0)[:3]},
+				}
+			} else {
+				// Follow-up: return a valid question
+				d.Questions = []Question{
+					{Text: "Fixed Q", Choices: fiveChoices(0)},
+				}
+			}
+		case *reviewResponse:
+			d.Verdict = "accept"
+		}
+		return nil
+	}}
+
+	g := New(ai)
+	questions, err := g.GenerateWithLanguage(context.Background(), "Go", "en", "content")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(questions) != 1 || questions[0].Text != "Fixed Q" {
+		t.Errorf("expected 1 fixed question, got %v", questions)
+	}
+	if callCount < 2 {
+		t.Errorf("expected at least 2 LLM calls (initial + follow-up), got %d", callCount)
 	}
 }
 

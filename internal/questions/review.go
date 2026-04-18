@@ -17,43 +17,8 @@ type reviewResponse struct {
 	Question *Question `json:"question,omitempty"`
 }
 
-// reviewResponseSchema is the JSON Schema passed to Ollama to constrain the
-// review response format.
-var reviewResponseSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"verdict": map[string]any{
-			"type": "string",
-			"enum": []string{"accept", "improve", "reject"},
-		},
-		"reason": map[string]any{"type": "string"},
-		"question": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"text": map[string]any{"type": "string"},
-				"choices": map[string]any{
-					"type":     "array",
-					"minItems": 5,
-					"maxItems": 5,
-					"items": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"text":    map[string]any{"type": "string"},
-							"correct": map[string]any{"type": "boolean"},
-						},
-						"required": []string{"text", "correct"},
-					},
-				},
-			},
-			"required": []string{"text", "choices"},
-		},
-	},
-	"required": []string{"verdict", "reason"},
-}
-
-// reviewPromptTemplate is the prompt sent to the LLM to evaluate a question.
-// Parameters: formatted question block (text + choices with the correct answer marked).
-const reviewPromptTemplate = `You are a trivia quality reviewer. A question has been automatically generated and one choice has been marked as correct.
+// reviewSystemPrompt is the system instruction for quality review sessions.
+const reviewSystemPrompt = `You are a trivia quality reviewer. A question has been automatically generated and one choice has been marked as correct.
 
 Your tasks:
 1. Verify that the marked correct answer is factually accurate.
@@ -65,7 +30,12 @@ Return one of three verdicts:
 - "improve": the question has fixable issues; return the corrected version in the "question" field with all 5 choices and exactly 1 marked correct.
 - "reject": the question is fundamentally flawed (factually wrong correct answer, genuinely ambiguous, or no clear correct answer exists).
 
-%s`
+Respond with JSON only:
+{
+  "verdict": "accept" | "improve" | "reject",
+  "reason": "brief explanation",
+  "question": { "text": "...", "choices": [...] }
+}`
 
 // reviewQuestion asks the LLM to evaluate q for factual accuracy and quality.
 // It returns the (possibly improved) question and true if the question should be
@@ -73,10 +43,11 @@ Return one of three verdicts:
 // On LLM error the original question is returned with kept=true so a transient
 // failure does not silently drop content.
 func (g *Generator) reviewQuestion(ctx context.Context, title string, q Question) (Question, bool, error) {
-	prompt := fmt.Sprintf(reviewPromptTemplate, formatQuestionForReview(q))
+	session := g.ai.NewChat(reviewSystemPrompt)
+	prompt := formatQuestionForReview(q)
 
 	var resp reviewResponse
-	if err := g.ai.GenerateJSONSchema(ctx, prompt, reviewResponseSchema, &resp); err != nil {
+	if err := session.Send(ctx, prompt, &resp); err != nil {
 		return q, true, fmt.Errorf("review question: %w", err)
 	}
 
@@ -87,7 +58,6 @@ func (g *Generator) reviewQuestion(ctx context.Context, title string, q Question
 		return Question{}, false, nil
 	case "improve":
 		if resp.Question == nil {
-			// LLM said improve but gave no revised version — keep original.
 			return q, true, nil
 		}
 		improved := *resp.Question

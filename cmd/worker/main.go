@@ -22,13 +22,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	ollamaHost := os.Getenv("OLLAMA_HOST")
-	if ollamaHost == "" {
-		ollamaHost = "http://localhost:11434"
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	if geminiAPIKey == "" {
+		logger.Error("GEMINI_API_KEY is not set")
+		os.Exit(1)
 	}
-	ollamaModel := os.Getenv("OLLAMA_MODEL")
-	if ollamaModel == "" {
-		ollamaModel = "gemma4:e2b"
+
+	geminiModel := os.Getenv("GEMINI_MODEL")
+	if geminiModel == "" {
+		geminiModel = "gemini-2.5-flash"
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -41,7 +43,13 @@ func main() {
 	}
 	defer database.Close()
 
-	aiClient := ai.New(ollamaHost, ollamaModel)
+	aiClient, err := ai.New(ctx, geminiAPIKey, geminiModel)
+	if err != nil {
+		logger.Error("create AI client", "err", err)
+		os.Exit(1)
+	}
+	defer aiClient.Close()
+
 	generator := questions.New(aiClient, logger)
 
 	w := worker.NewQuestionWorker(database.Pages(), database.Questions(), generator, logger)

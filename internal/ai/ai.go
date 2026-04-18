@@ -1,97 +1,115 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"time"
+
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/googleapi"
+	"google.golang.org/api/option"
 )
 
-// Client is a thin HTTP wrapper around the Ollama /api/generate endpoint.
-// Use New to construct one; pass OLLAMA_HOST and OLLAMA_MODEL as arguments.
+// Session is a multi-turn conversation that returns structured JSON responses.
+// *Chat implements Session; this interface is exported so callers can mock it.
+type Session interface {
+	Send(ctx context.Context, message string, dst any) error
+}
+
+// Client wraps Google Generative AI for structured JSON chat conversations.
+// Use New to construct one; pass GEMINI_API_KEY and model name as arguments.
 type Client struct {
-	host   string
-	model  string
-	client *http.Client
+	inner     *genai.Client
+	modelName string
 }
 
-// New returns an AI Client targeting the given Ollama host with the given model.
-func New(host, model string) *Client {
-	return &Client{
-		host:   host,
-		model:  model,
-		client: &http.Client{},
-	}
-}
-
-// generateRequest is the body sent to Ollama.
-type generateRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
-	Format any    `json:"format"`
-}
-
-// generateResponse is the shape of a completed (non-streamed) Ollama reply.
-type generateResponse struct {
-	Response string `json:"response"`
-	Done     bool   `json:"done"`
-}
-
-// GenerateJSON sends a prompt to Ollama with format:"json", reads the
-// completed response, and unmarshals the JSON text into dst (must be a pointer).
-func (c *Client) GenerateJSON(ctx context.Context, prompt string, dst any) error {
-	return c.generate(ctx, prompt, "json", dst)
-}
-
-// GenerateJSONSchema sends a prompt to Ollama with a JSON Schema as the format
-// constraint, forcing the model to produce output that matches the schema.
-// schema must be a JSON-serialisable value representing a JSON Schema object.
-// dst must be a pointer that the JSON response will be unmarshalled into.
-func (c *Client) GenerateJSONSchema(ctx context.Context, prompt string, schema any, dst any) error {
-	return c.generate(ctx, prompt, schema, dst)
-}
-
-func (c *Client) generate(ctx context.Context, prompt string, format any, dst any) error {
-	reqBody := generateRequest{
-		Model:  c.model,
-		Prompt: prompt,
-		Stream: false,
-		Format: format,
-	}
-
-	encoded, err := json.Marshal(reqBody)
+// New returns a Client backed by the given Google AI model and API key.
+// The caller must call Close when done to release the underlying connection.
+func New(ctx context.Context, apiKey, model string) (*Client, error) {
+	inner, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("create gemini client: %w", err)
 	}
+	return &Client{inner: inner, modelName: model}, nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host+"/api/generate", bytes.NewReader(encoded))
+// Close releases the underlying gRPC/HTTP connection.
+func (c *Client) Close() {
+	c.inner.Close()
+}
+
+// geminiSession is the subset of genai.ChatSession used by Chat.
+// Extracted as an interface so tests can substitute a mock without HTTP.
+type geminiSession interface {
+	SendMessage(ctx context.Context, parts ...genai.Part) (*genai.GenerateContentResponse, error)
+}
+
+// Chat is a stateful multi-turn conversation that returns JSON on every turn.
+type Chat struct {
+	session    geminiSession
+	retryDelay time.Duration // base delay for 429 backoff; overridden in tests
+}
+
+// NewChat starts a new JSON conversation with the given system instruction.
+// The model is instructed to return JSON on every turn.
+func (c *Client) NewChat(systemPrompt string) Session {
+	model := c.inner.GenerativeModel(c.modelName)
+	model.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{genai.Text(systemPrompt)},
+	}
+	model.ResponseMIMEType = "application/json"
+	return &Chat{session: model.StartChat(), retryDelay: retryBaseDelay}
+}
+
+const (
+	maxSendRetries = 4
+	retryBaseDelay = 2 * time.Second
+)
+
+// Send sends a user message in the conversation and unmarshals the JSON
+// response into dst (must be a pointer). On HTTP 429 it retries up to
+// maxSendRetries times with exponential backoff before giving up.
+func (ch *Chat) Send(ctx context.Context, message string, dst any) error {
+	for attempt := 0; attempt <= maxSendRetries; attempt++ {
+		err := ch.send(ctx, message, dst)
+		if err == nil {
+			return nil
+		}
+		var apiErr *googleapi.Error
+		if errors.As(err, &apiErr) && apiErr.Code == 429 && attempt < maxSendRetries {
+			delay := ch.retryDelay * time.Duration(1<<attempt)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("send: max retries exceeded")
+}
+
+func (ch *Chat) send(ctx context.Context, message string, dst any) error {
+	resp, err := ch.session.SendMessage(ctx, genai.Text(message))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("gemini send: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("ollama request: %w", err)
+	if len(resp.Candidates) == 0 {
+		return fmt.Errorf("gemini returned no candidates")
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("ollama returned status %d: %s", resp.StatusCode, body)
+	cand := resp.Candidates[0]
+	if cand.Content == nil || len(cand.Content.Parts) == 0 {
+		return fmt.Errorf("gemini candidate has no content")
 	}
-
-	var genResp generateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&genResp); err != nil {
-		return fmt.Errorf("decode ollama response: %w", err)
+	text, ok := cand.Content.Parts[0].(genai.Text)
+	if !ok {
+		return fmt.Errorf("gemini response part is not text")
 	}
-
-	if err := json.Unmarshal([]byte(genResp.Response), dst); err != nil {
-		return fmt.Errorf("unmarshal model output: %w", err)
+	if err := json.Unmarshal([]byte(text), dst); err != nil {
+		return fmt.Errorf("unmarshal gemini response: %w", err)
 	}
-
 	return nil
 }

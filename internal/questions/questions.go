@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 
 	"github.com/ericovis/freewikigames.com/internal/ai"
-	"golang.org/x/sync/semaphore"
 )
 
 // Choice is a single answer option for a question.
@@ -77,14 +75,9 @@ Rules:
   ]
 }`
 
-const (
-	// maxValidationRetries is the number of follow-up turns allowed to fix
-	// structurally invalid questions before giving up and keeping only the valid ones.
-	maxValidationRetries = 3
-	// reviewConcurrency is the maximum number of parallel quality-review calls.
-	// Caps Gemini RPM usage during the review phase.
-	reviewConcurrency = 3
-)
+// maxValidationRetries is the number of follow-up turns allowed to fix
+// structurally invalid questions before giving up and keeping only the valid ones.
+const maxValidationRetries = 3
 
 // GenerateWithLanguage generates trivia questions from a full Wikipedia article.
 // It sends the entire content in one request, validates the output, and follows
@@ -99,8 +92,6 @@ func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, c
 	if err := session.Send(ctx, userMessage, &resp); err != nil {
 		return nil, fmt.Errorf("generate questions: %w", err)
 	}
-
-	g.logger.Info("initial generation", "title", title, "raw", len(resp.Questions))
 
 	// Follow up if any questions are structurally invalid.
 	for retry := 0; retry < maxValidationRetries && hasInvalid(resp.Questions); retry++ {
@@ -117,8 +108,6 @@ func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, c
 		g.logger.Debug("follow-up response", "title", title, "retry", retry+1, "raw", len(resp.Questions))
 	}
 
-	// Filter to structurally valid questions, then run quality review in parallel
-	// with a semaphore to cap concurrent Gemini calls.
 	var valid []Question
 	for _, q := range resp.Questions {
 		if err := validate(q); err != nil {
@@ -128,41 +117,8 @@ func (g *Generator) GenerateWithLanguage(ctx context.Context, title, language, c
 		valid = append(valid, q)
 	}
 
-	sem := semaphore.NewWeighted(reviewConcurrency)
-	var (
-		mu     sync.Mutex
-		result []Question
-		wg     sync.WaitGroup
-	)
-	for _, q := range valid {
-		if err := sem.Acquire(ctx, 1); err != nil {
-			break // context cancelled
-		}
-		wg.Add(1)
-		go func(q Question) {
-			defer sem.Release(1)
-			defer wg.Done()
-			reviewed, keep, err := g.reviewQuestion(ctx, title, q)
-			if err != nil {
-				g.logger.Warn("review failed, keeping original", "title", title, "err", err)
-				mu.Lock()
-				result = append(result, q)
-				mu.Unlock()
-				return
-			}
-			if keep {
-				mu.Lock()
-				result = append(result, reviewed)
-				mu.Unlock()
-			} else {
-				g.logger.Debug("question rejected by review", "title", title, "question", q.Text)
-			}
-		}(q)
-	}
-	wg.Wait()
-
-	g.logger.Info("questions generated", "title", title, "valid", len(result))
-	return result, nil
+	g.logger.Info("questions generated", "title", title, "valid", len(valid))
+	return valid, nil
 }
 
 // hasInvalid reports whether any question in qs fails structural validation.

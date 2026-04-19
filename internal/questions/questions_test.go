@@ -38,14 +38,11 @@ func fiveChoices(correctIdx int) []Choice {
 
 func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
 	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
-		switch d := dst.(type) {
-		case *llmResponse:
+		if d, ok := dst.(*llmResponse); ok {
 			d.Questions = []Question{
 				{Text: "Q1", Choices: fiveChoices(0)},
 				{Text: "Q2", Choices: fiveChoices(2)},
 			}
-		case *reviewResponse:
-			d.Verdict = "accept"
 		}
 		return nil
 	}}
@@ -62,14 +59,11 @@ func TestGenerator_GenerateWithLanguage_ValidResponse(t *testing.T) {
 
 func TestGenerator_GenerateWithLanguage_SkipsInvalidChoiceCount(t *testing.T) {
 	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
-		switch d := dst.(type) {
-		case *llmResponse:
+		if d, ok := dst.(*llmResponse); ok {
 			d.Questions = []Question{
 				{Text: "Bad Q", Choices: []Choice{{Text: "A", Correct: true}}},
 				{Text: "Good Q", Choices: fiveChoices(1)},
 			}
-		case *reviewResponse:
-			d.Verdict = "accept"
 		}
 		return nil
 	}}
@@ -173,9 +167,6 @@ func TestGenerator_GenerateWithLanguage_SystemPromptContainsLanguage(t *testing.
 			if resp, ok := dst.(*llmResponse); ok {
 				resp.Questions = []Question{{Text: "Q", Choices: fiveChoices(0)}}
 			}
-			if resp, ok := dst.(*reviewResponse); ok {
-				resp.Verdict = "accept"
-			}
 			return nil
 		},
 		onNewChat: func(systemPrompt string) {
@@ -209,22 +200,17 @@ func (m *captureSystemMockAI) NewChat(systemPrompt string) ai.Session {
 func TestGenerator_GenerateWithLanguage_FollowsUpOnInvalidQuestions(t *testing.T) {
 	callCount := 0
 	ai := &mockAI{fn: func(ctx context.Context, message string, dst any) error {
-		switch d := dst.(type) {
-		case *llmResponse:
+		if d, ok := dst.(*llmResponse); ok {
 			callCount++
 			if callCount == 1 {
-				// First call: return an invalid question (3 choices)
 				d.Questions = []Question{
 					{Text: "Bad Q", Choices: fiveChoices(0)[:3]},
 				}
 			} else {
-				// Follow-up: return a valid question
 				d.Questions = []Question{
 					{Text: "Fixed Q", Choices: fiveChoices(0)},
 				}
 			}
-		case *reviewResponse:
-			d.Verdict = "accept"
 		}
 		return nil
 	}}

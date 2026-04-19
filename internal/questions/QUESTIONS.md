@@ -12,10 +12,8 @@ This package has no database dependency. Persisting questions to PostgreSQL is t
 
 | File               | Responsibility                                                |
 |--------------------|---------------------------------------------------------------|
-| `questions.go`     | `Choice`, `Question`, `Generator`, `GenerateWithLanguage()`, `validate()`, `splitSections()` |
-| `review.go`        | `reviewQuestion()` — LLM quality-review step (accept / improve / reject) |
+| `questions.go`     | `Choice`, `Question`, `Generator`, `GenerateWithLanguage()`, `validate()` |
 | `questions_test.go`| Unit tests for generation and the full pipeline               |
-| `review_test.go`   | Unit tests for the review step in isolation                   |
 | `QUESTIONS.md`     | This developer guide                                          |
 
 ## Key Types
@@ -66,16 +64,9 @@ The `format: "json"` flag in the Ollama request instructs the model to output va
 
 ## Generation Pipeline
 
-Each article section goes through two LLM calls before a question is kept:
-
-1. **Generation** (`generateForSection`) — the LLM writes 1–2 questions from the section text.
-2. **Structural validation** (`validate`) — exactly 5 choices, exactly 1 correct; structurally invalid questions are dropped silently.
-3. **Quality review** (`reviewQuestion`) — a second LLM call presents the question with the correct answer marked and asks the model to verify factual accuracy, clarity, and plausible distractors. The model returns one of three verdicts:
-   - `accept` — question is kept as-is.
-   - `improve` — model returns a revised question; if it passes `validate` the revision is used, otherwise the original is kept.
-   - `reject` — question is dropped.
-
-On review error (transient LLM failure) the original question is kept so a flaky Ollama instance does not silently discard content.
+1. **Generation** (`GenerateWithLanguage`) — the LLM writes as many questions as possible from the full article in a single request.
+2. **Validation follow-up** — if any questions fail structural validation, a follow-up turn in the same session asks the model to fix them (up to `maxValidationRetries` times).
+3. **Structural validation** (`validate`) — exactly 5 choices, exactly 1 correct; structurally invalid questions are dropped silently.
 
 ## Structural Validation Rules
 
@@ -98,7 +89,7 @@ Before building the prompt, `stripHTML` removes all HTML tags using a regexp and
 
 - **No real Ollama or database in tests.** Use the `mockAI` struct (defined in `questions_test.go`) which implements `aiClient`.
 - Test the golden path (all valid questions), the skip paths (wrong choice count, 0 or 2+ correct), and the error path (AI client failure).
-- Test `stripHTML` and `validate` as pure functions with table-driven cases.
+- Test `validate` as a pure function with table-driven cases.
 
 ## Anti-Patterns
 

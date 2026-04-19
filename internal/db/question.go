@@ -86,6 +86,31 @@ func (d *QuestionDAO) Delete(ctx context.Context, id int64) error {
 	return err
 }
 
+// FindNextForSession returns a random question that has not yet been answered
+// in the given session, filtered by language. If pageID is non-nil only
+// questions from that page are considered. Returns (nil, nil) when no
+// unanswered questions remain.
+func (d *QuestionDAO) FindNextForSession(ctx context.Context, language string, pageID *int64, sessionID int64) (*Question, error) {
+	row := d.pool.QueryRow(ctx, `
+		SELECT q.id, q.page_id, q.text, q.choices, q.created_at
+		FROM   questions q
+		JOIN   pages p ON p.id = q.page_id
+		WHERE  p.language = $1
+		  AND  ($2::bigint IS NULL OR q.page_id = $2)
+		  AND  q.id NOT IN (
+		           SELECT question_id FROM game_answers WHERE session_id = $3
+		       )
+		ORDER  BY RANDOM()
+		LIMIT  1
+	`, language, pageID, sessionID)
+
+	q, err := scanQuestion(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return q, err
+}
+
 // scanQuestion scans a single row into a Question, unmarshalling the JSONB
 // choices column.
 func scanQuestion(row pgx.Row) (*Question, error) {

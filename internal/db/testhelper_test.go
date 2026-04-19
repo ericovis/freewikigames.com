@@ -45,7 +45,7 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(),
-		`TRUNCATE pages, questions, schema_migrations RESTART IDENTITY CASCADE`,
+		`TRUNCATE game_answers, game_participants, game_sessions, users, pages, questions, schema_migrations RESTART IDENTITY CASCADE`,
 	)
 	if err != nil {
 		t.Fatalf("truncate tables: %v", err)

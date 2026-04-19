@@ -47,3 +47,18 @@ func (d *DB) Pages() *PageDAO {
 func (d *DB) Questions() *QuestionDAO {
 	return &QuestionDAO{pool: d.pool}
 }
+
+// Users returns a UserDAO bound to this DB's connection pool.
+func (d *DB) Users() *UserDAO {
+	return &UserDAO{pool: d.pool}
+}
+
+// GameSessions returns a GameSessionDAO bound to this DB's connection pool.
+func (d *DB) GameSessions() *GameSessionDAO {
+	return &GameSessionDAO{pool: d.pool}
+}
+
+// GameAnswers returns a GameAnswerDAO bound to this DB's connection pool.
+func (d *DB) GameAnswers() *GameAnswerDAO {
+	return &GameAnswerDAO{pool: d.pool}
+}
